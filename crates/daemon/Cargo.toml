@@ -1,0 +1,15 @@
+[package]
+name = "plusysmond"
+description = "PluSystemMonitor daemon: collects system metrics and serves them over WebSocket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plusysmon-protocol.workspace = true
+anyhow.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time", "macros", "sync", "signal"] }
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
