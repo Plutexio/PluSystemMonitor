@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change to the message types.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -83,6 +83,7 @@ pub struct Sample {
     pub timestamp_ms: u64,
     pub cpu: CpuSample,
     pub mem: MemSample,
+    pub gpus: Vec<GpuSample>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +91,32 @@ pub struct CpuSample {
     /// Overall utilisation, 0.0..=100.0.
     pub total: f32,
     pub per_core: Vec<f32>,
+}
+
+/// One graphics card. Optional fields are what not every driver reports.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GpuSample {
+    pub name: String,
+    /// NVIDIA, AMD, ...
+    pub vendor: String,
+    /// 0.0..=100.0
+    pub usage: f32,
+    /// Bytes.
+    pub memory_used: u64,
+    pub memory_total: u64,
+    /// °C
+    pub temperature: Option<f32>,
+    /// Watts.
+    pub power: Option<f32>,
+    pub power_limit: Option<f32>,
+    /// MHz.
+    pub core_clock: Option<u32>,
+    pub memory_clock: Option<u32>,
+    /// Percent of maximum fan speed.
+    pub fan: Option<f32>,
+    /// Video engine utilisation, 0.0..=100.0.
+    pub encoder: Option<f32>,
+    pub decoder: Option<f32>,
 }
 
 /// All values in bytes.
@@ -168,6 +195,10 @@ pub struct ProcessStats {
     /// The kernel's state letter: R, S, D, T, Z, I, ...
     pub state: char,
     pub nice: i32,
+    /// Share of the GPU's engine time (summed over GPUs), for processes on a GPU.
+    pub gpu: Option<f32>,
+    /// Video memory in bytes, for processes holding any.
+    pub gpu_memory: Option<u64>,
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
@@ -212,6 +243,7 @@ mod tests {
                 swap_total: 4,
                 swap_used: 1,
             },
+            gpus: vec![],
         });
         let ServerMsg::Sample(s) = decode::<ServerMsg>(&encode(&msg)).unwrap() else {
             panic!("wrong variant");

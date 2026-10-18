@@ -60,6 +60,20 @@ Adding a widget type: create `crates/frontend/qml/widgets/MyWidget.qml` (it gets
 `monitor` and `options`), register it in `qml/Widgets.qml` with its sizes and
 options, and list the file in `crates/frontend/build.rs`.
 
+## GPUs
+
+- **NVIDIA** through NVML (`libnvidia-ml.so`, part of the driver), loaded at
+  runtime: the daemon runs fine without it. Load, VRAM, temperature, power,
+  clocks, fan, encoder/decoder, and per-process GPU load and video memory
+  (Processes columns, app totals). NVML adds about 20 MiB to the daemon.
+- **AMD** through amdgpu's sysfs files (`gpu_busy_percent`, VRAM, hwmon);
+  names come from the PCI ID database. Not yet tested on real hardware, and
+  without per-process figures for now.
+- Intel GPUs are not shown yet: their load needs perf counters.
+
+`cargo test -p plusysmond live_gpus -- --ignored --nocapture` prints what the
+daemon sees on the current machine.
+
 ## Processes
 
 The Processes page lists everything running on the connected machine: search by

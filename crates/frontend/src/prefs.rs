@@ -65,7 +65,7 @@ impl Default for Prefs {
 impl Default for ProcessView {
     fn default() -> Self {
         Self {
-            columns: ["pid", "user", "cpu", "memory", "read", "write"]
+            columns: ["pid", "user", "cpu", "memory", "gpu", "read", "write"]
                 .map(str::to_owned)
                 .to_vec(),
             sort: "cpu".to_owned(),

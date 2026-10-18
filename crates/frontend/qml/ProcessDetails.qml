@@ -133,6 +133,18 @@ Rectangle {
                 valueColor: Theme.memory
             }
             Stat {
+                visible: root.stats !== null && root.stats.gpu !== null
+                label: "GPU"
+                value: root.stats && root.stats.gpu !== null ? root.stats.gpu.toFixed(0) + "%" : ""
+                valueColor: Theme.gpu
+            }
+            Stat {
+                visible: root.stats !== null && root.stats.gpu_memory !== null
+                label: "GPU memory"
+                value: root.stats && root.stats.gpu_memory !== null ? Format.bytes(root.stats.gpu_memory) : ""
+                valueColor: Theme.gpu
+            }
+            Stat {
                 label: "Disk read"
                 value: root.stats ? (root.stats.read_rate === null ? "Not permitted" : Format.rate(root.stats.read_rate) || "0 B/s") : ""
             }

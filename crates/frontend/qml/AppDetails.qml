@@ -128,6 +128,8 @@ Rectangle {
                 model: [
                     { label: "CPU", key: "cpu", color: Theme.cpu },
                     { label: "Memory", key: "memory", color: Theme.memory },
+                    { label: "GPU", key: "gpu", color: Theme.gpu },
+                    { label: "GPU memory", key: "gpuMemory", color: Theme.gpu },
                     { label: "Disk read", key: "readRate", color: Theme.text },
                     { label: "Disk write", key: "writeRate", color: Theme.text }
                 ]
@@ -154,8 +156,10 @@ Rectangle {
                             const value = root.details[modelData.key]
                             if (modelData.key === "cpu")
                                 return value.toFixed(1) + "%"
-                            if (modelData.key === "memory")
+                            if (modelData.key === "memory" || modelData.key === "gpuMemory")
                                 return Format.bytes(value)
+                            if (modelData.key === "gpu")
+                                return value.toFixed(0) + "%"
                             return Format.rate(value) || "0 B/s"
                         }
                         color: modelData.color

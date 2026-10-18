@@ -14,7 +14,7 @@ Item {
     signal settingsEdited(var settings)
     signal processRequested(int pid)
 
-    readonly property var sortKeys: ["name", "cpu", "memory"]
+    readonly property var sortKeys: ["name", "cpu", "memory", "gpu"]
 
     AppModel {
         id: apps
@@ -56,7 +56,7 @@ Item {
             }
 
             Segmented {
-                model: ["Name", "CPU", "Memory"]
+                model: ["Name", "CPU", "Memory", "GPU"]
                 currentIndex: Math.max(0, root.sortKeys.indexOf(apps.sortKey))
                 onActivated: index => {
                     root.settings = Object.assign({}, root.settings, { sort: root.sortKeys[index] })

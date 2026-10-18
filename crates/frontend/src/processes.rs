@@ -41,6 +41,8 @@ impl ProcessTable {
                 threads: 0,
                 state: '?',
                 nice: 0,
+                gpu: None,
+                gpu_memory: None,
             };
             self.processes.insert(info.pid, Process { info, stats });
         }
@@ -74,7 +76,8 @@ impl ProcessTable {
 }
 
 pub struct Query<'a> {
-    /// One of name, pid, user, cpu, memory, read, write, threads, state, nice.
+    /// One of name, pid, user, cpu, memory, read, write, threads, state, nice,
+    /// gpu, gpuMemory.
     pub sort: &'a str,
     pub descending: bool,
     /// Matched case-insensitively against name, command and user, or as a PID prefix.
@@ -126,6 +129,12 @@ fn compare(a: &Process, b: &Process, key: &str) -> Ordering {
         "threads" => a.stats.threads.cmp(&b.stats.threads),
         "state" => a.stats.state.cmp(&b.stats.state),
         "nice" => a.stats.nice.cmp(&b.stats.nice),
+        "gpu" => a
+            .stats
+            .gpu
+            .unwrap_or(-1.0)
+            .total_cmp(&b.stats.gpu.unwrap_or(-1.0)),
+        "gpuMemory" => a.stats.gpu_memory.cmp(&b.stats.gpu_memory),
         _ => Ordering::Equal,
     }
 }
@@ -155,6 +164,8 @@ mod tests {
             threads: 1,
             state: 'S',
             nice: 0,
+            gpu: None,
+            gpu_memory: None,
         };
         (info, stats)
     }

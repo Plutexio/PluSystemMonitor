@@ -15,7 +15,8 @@ Item {
     property real thickness: Math.max(8, size * 0.075)
 
     readonly property real size: Math.min(width, height)
-    readonly property real radius: (size - thickness) / 2 - 10
+    // The inset keeps the glow inside the item; on small gauges it must shrink too.
+    readonly property real radius: (size - thickness) / 2 - Math.min(10, size * 0.06)
     property real shown: value
 
     Behavior on shown {
@@ -88,6 +89,8 @@ Item {
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
+            // Small gauges keep just the number readable.
+            visible: root.size >= 100
             text: root.label
             color: Theme.textDim
             font.pixelSize: Math.max(11, root.size * 0.065)
@@ -98,6 +101,8 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: root.size * 0.04
+        // Sits in the arc's open bottom, which only has room on larger gauges.
+        visible: root.size >= 150
         text: root.caption
         color: Theme.textDim
         font.pixelSize: 12

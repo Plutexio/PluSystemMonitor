@@ -25,6 +25,8 @@ const ROLES: &[&str] = &[
     "writeRate",
     "processCount",
     "history",
+    "gpu",
+    "gpuMemory",
 ];
 const USER_ROLE: i32 = 0x0100;
 
@@ -156,6 +158,8 @@ impl qobject::AppModel {
             Some("writeRate") => QVariant::from(&(app.write_rate as f64)),
             Some("processCount") => QVariant::from(&(app.pids.len() as i32)),
             Some("history") => QVariant::from(&QList::from(&row.history)),
+            Some("gpu") => QVariant::from(&app.gpu),
+            Some("gpuMemory") => QVariant::from(&(app.gpu_memory as f64)),
             _ => QVariant::default(),
         }
     }

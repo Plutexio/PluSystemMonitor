@@ -8,6 +8,7 @@ use std::time::Instant;
 use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats};
 
 use super::apps::{self, Apps, Assets};
+use super::gpu::GpuUse;
 use super::steam;
 use super::users::Users;
 
@@ -66,7 +67,11 @@ impl ProcessCollector {
     /// `total_ticks` is the machine-wide CPU time that passed since the previous
     /// call, as measured by the CPU collector, so per-process shares add up to the
     /// total gauge. Also returns the apps that are referenced for the first time.
-    pub fn sample(&mut self, total_ticks: u64) -> (Vec<(ProcessInfo, ProcessStats)>, Vec<AppInfo>) {
+    pub fn sample(
+        &mut self,
+        total_ticks: u64,
+        gpu: &HashMap<u32, GpuUse>,
+    ) -> (Vec<(ProcessInfo, ProcessStats)>, Vec<AppInfo>) {
         let now = Instant::now();
         let elapsed = self
             .last_sample
@@ -84,7 +89,8 @@ impl ProcessCollector {
                 continue;
             };
             // A process can exit between listing and reading; just skip it.
-            if let Some(process) = self.read(pid, previous.remove(&pid), total_ticks, elapsed) {
+            let prev = previous.remove(&pid);
+            if let Some(process) = self.read(pid, prev, total_ticks, elapsed, gpu.get(&pid)) {
                 processes.push(process);
             }
         }
@@ -126,6 +132,7 @@ impl ProcessCollector {
         prev: Option<Tracked>,
         total_ticks: u64,
         elapsed: f64,
+        gpu: Option<&GpuUse>,
     ) -> Option<(ProcessInfo, ProcessStats)> {
         let stat = parse_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)?;
         let started_ms = self.boot_time_ms + stat.start_ticks * 1000 / self.ticks_per_second;
@@ -169,6 +176,8 @@ impl ProcessCollector {
             threads: stat.threads,
             state: stat.state,
             nice: stat.nice,
+            gpu: gpu.map(|g| g.usage),
+            gpu_memory: gpu.map(|g| g.memory),
         };
         self.tracked.insert(
             pid,
@@ -359,7 +368,7 @@ mod tests {
     fn live_apps() {
         let assets = Assets::default();
         let mut collector = ProcessCollector::new(assets.clone());
-        let (processes, apps) = collector.sample(0);
+        let (processes, apps) = collector.sample(0, &HashMap::new());
         for app in &apps {
             let members: Vec<&str> = processes
                 .iter()
@@ -393,8 +402,8 @@ mod tests {
     #[test]
     fn samples_this_process() {
         let mut collector = ProcessCollector::new(Assets::default());
-        collector.sample(0);
-        let (processes, _) = collector.sample(100);
+        collector.sample(0, &HashMap::new());
+        let (processes, _) = collector.sample(100, &HashMap::new());
         let me = std::process::id();
         let (info, stats) = processes.iter().find(|(info, _)| info.pid == me).unwrap();
         assert!(!info.kernel_thread);

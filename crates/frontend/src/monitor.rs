@@ -41,6 +41,9 @@ pub mod qobject {
         #[qproperty(f64, swap_total, cxx_name = "swapTotal")]
         #[qproperty(f64, swap_used, cxx_name = "swapUsed")]
         #[qproperty(QList_f64, mem_history, cxx_name = "memHistory")]
+        /// JSON array, one object per GPU: the latest `GpuSample` fields in
+        /// camelCase plus `history` (usage %) and `memoryHistory` (VRAM %).
+        #[qproperty(QString, gpus)]
         /// Set while something shows processes; the daemon only sends them then.
         #[qproperty(bool, processes_enabled, cxx_name = "processesEnabled")]
         #[qproperty(i32, process_count, cxx_name = "processCount")]
@@ -293,6 +296,7 @@ pub struct MonitorRust {
     swap_total: f64,
     swap_used: f64,
     mem_history: QList<f64>,
+    gpus: QString,
     processes_enabled: bool,
     process_count: i32,
 
@@ -302,6 +306,8 @@ pub struct MonitorRust {
     commands: Option<UnboundedSender<Command>>,
     cpu_points: VecDeque<f64>,
     mem_points: VecDeque<f64>,
+    /// Per GPU: usage and VRAM-use history.
+    gpu_points: Vec<[VecDeque<f64>; 2]>,
     processes: ProcessTable,
     app_history: History,
     assets: AssetCache,
@@ -323,6 +329,7 @@ impl Default for MonitorRust {
             swap_total: 0.0,
             swap_used: 0.0,
             mem_history: QList::default(),
+            gpus: QString::from("[]"),
             processes_enabled: false,
             process_count: 0,
             generation: 0,
@@ -330,6 +337,7 @@ impl Default for MonitorRust {
             commands: None,
             cpu_points: VecDeque::with_capacity(HISTORY_POINTS),
             mem_points: VecDeque::with_capacity(HISTORY_POINTS),
+            gpu_points: Vec::new(),
             processes: ProcessTable::default(),
             app_history: History::default(),
             assets: AssetCache::default(),
@@ -476,11 +484,14 @@ impl qobject::Monitor {
             "memory": app.memory,
             "readRate": app.read_rate,
             "writeRate": app.write_rate,
+            "gpu": app.gpu,
+            "gpuMemory": app.gpu_memory,
             "processes": processes.iter().map(|p| json!({
                 "pid": p.info.pid,
                 "name": p.info.name,
                 "cpu": p.stats.cpu,
                 "memory": p.stats.memory,
+                "gpu": p.stats.gpu,
             })).collect::<Vec<_>>(),
         });
         QString::from(&details.to_string())
@@ -546,6 +557,7 @@ impl qobject::Monitor {
                     let mut rust = self.as_mut().rust_mut();
                     rust.cpu_points.clear();
                     rust.mem_points.clear();
+                    rust.gpu_points.clear();
                 }
                 for sample in &history {
                     self.as_mut().record(sample);
@@ -642,14 +654,20 @@ impl qobject::Monitor {
         } else {
             0.0
         };
-        for (points, value) in [
-            (&mut rust.cpu_points, sample.cpu.total as f64),
-            (&mut rust.mem_points, mem_percent),
-        ] {
+        let push = |points: &mut VecDeque<f64>, value: f64| {
             if points.len() == HISTORY_POINTS {
                 points.pop_front();
             }
             points.push_back(value);
+        };
+        push(&mut rust.cpu_points, sample.cpu.total as f64);
+        push(&mut rust.mem_points, mem_percent);
+        rust.gpu_points
+            .resize_with(sample.gpus.len(), Default::default);
+        for (gpu, [usage, memory]) in sample.gpus.iter().zip(&mut rust.gpu_points) {
+            push(usage, gpu.usage as f64);
+            let used = gpu.memory_used as f64 / gpu.memory_total.max(1) as f64 * 100.0;
+            push(memory, used);
         }
     }
 
@@ -658,6 +676,30 @@ impl qobject::Monitor {
         let cpu_history: QList<f64> = self.rust().cpu_points.iter().collect();
         let mem_history: QList<f64> = self.rust().mem_points.iter().collect();
         let cores: Vec<f64> = sample.cpu.per_core.iter().map(|&c| c as f64).collect();
+        let gpus: Vec<serde_json::Value> = sample
+            .gpus
+            .iter()
+            .zip(&self.rust().gpu_points)
+            .map(|(gpu, [usage, memory])| {
+                json!({
+                    "name": gpu.name,
+                    "vendor": gpu.vendor,
+                    "usage": gpu.usage,
+                    "memoryUsed": gpu.memory_used,
+                    "memoryTotal": gpu.memory_total,
+                    "temperature": gpu.temperature,
+                    "power": gpu.power,
+                    "powerLimit": gpu.power_limit,
+                    "coreClock": gpu.core_clock,
+                    "memoryClock": gpu.memory_clock,
+                    "fan": gpu.fan,
+                    "encoder": gpu.encoder,
+                    "decoder": gpu.decoder,
+                    "history": usage,
+                    "memoryHistory": memory,
+                })
+            })
+            .collect();
 
         self.as_mut().set_cpu_total(sample.cpu.total as f64);
         self.as_mut().set_cpu_cores(QList::from(cores));
@@ -666,6 +708,8 @@ impl qobject::Monitor {
         self.as_mut().set_mem_used(sample.mem.used as f64);
         self.as_mut().set_swap_total(sample.mem.swap_total as f64);
         self.as_mut().set_swap_used(sample.mem.swap_used as f64);
+        self.as_mut()
+            .set_gpus(QString::from(&serde_json::Value::from(gpus).to_string()));
         self.set_mem_history(mem_history);
     }
 }
@@ -684,6 +728,8 @@ const ROLES: &[&str] = &[
     "state",
     "nice",
     "mine",
+    "gpu",
+    "gpuMemory",
 ];
 const USER_ROLE: i32 = 0x0100;
 
@@ -834,6 +880,8 @@ impl qobject::ProcessModel {
             Some("threads") => QVariant::from(&(stats.threads as i32)),
             Some("state") => QVariant::from(&QString::from(&stats.state.to_string())),
             Some("nice") => QVariant::from(&stats.nice),
+            Some("gpu") => QVariant::from(&stats.gpu.map_or(-1.0, |g| g as f64)),
+            Some("gpuMemory") => QVariant::from(&stats.gpu_memory.map_or(-1.0, |m| m as f64)),
             Some("mine") => {
                 // SAFETY: see `refresh`.
                 let uid = unsafe { self.monitor().as_ref() }.map(|m| *m.uid());

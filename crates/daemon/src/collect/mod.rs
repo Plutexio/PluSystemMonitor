@@ -1,6 +1,7 @@
 mod apps;
 mod cpu;
 mod desktop;
+mod gpu;
 mod icons;
 mod mem;
 mod process;
@@ -16,6 +17,7 @@ use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats, Sample};
 
 pub struct Collector {
     cpu: cpu::CpuCollector,
+    gpu: gpu::GpuCollector,
     processes: process::ProcessCollector,
 }
 
@@ -23,6 +25,7 @@ impl Collector {
     pub fn new(assets: Assets) -> Result<Self> {
         Ok(Self {
             cpu: cpu::CpuCollector::new()?,
+            gpu: gpu::GpuCollector::new(),
             processes: process::ProcessCollector::new(assets),
         })
     }
@@ -36,12 +39,14 @@ impl Collector {
             timestamp_ms,
             cpu: self.cpu.sample()?,
             mem: mem::sample()?,
+            gpus: self.gpu.sample(),
         })
     }
 
     /// Call right after [`Self::sample`], whose CPU totals it divides by.
     pub fn sample_processes(&mut self) -> (Vec<(ProcessInfo, ProcessStats)>, Vec<AppInfo>) {
-        self.processes.sample(self.cpu.elapsed_ticks())
+        let gpu = self.gpu.processes();
+        self.processes.sample(self.cpu.elapsed_ticks(), &gpu)
     }
 
     pub fn processes_active(&self) -> bool {

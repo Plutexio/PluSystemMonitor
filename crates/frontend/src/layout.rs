@@ -111,7 +111,7 @@ mod tests {
     fn default_is_valid() {
         let layout = Layout::builtin_default();
         layout.validate().unwrap();
-        assert_eq!(layout.widgets.len(), 4);
+        assert_eq!(layout.widgets.len(), 6);
     }
 
     #[test]

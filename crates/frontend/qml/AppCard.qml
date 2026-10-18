@@ -16,6 +16,8 @@ Item {
     required property real memory
     required property int processCount
     required property list<real> history
+    required property real gpu
+    required property real gpuMemory
 
     property bool selected: false
     property int interval: 1000
@@ -166,6 +168,17 @@ Item {
                     color: Theme.cpu
                     font.pixelSize: 20
                     font.weight: Font.Bold
+                    font.features: { "tnum": 1 }
+                }
+                Text {
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 2
+                    // Many apps hold some VRAM; only actual GPU work is worth a number here.
+                    visible: card.gpu >= 0.5
+                    text: "GPU " + card.gpu.toFixed(0) + "%"
+                    color: Theme.gpu
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
                     font.features: { "tnum": 1 }
                 }
                 Text {

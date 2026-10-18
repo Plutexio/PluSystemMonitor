@@ -55,6 +55,28 @@ QtObject {
             ]
         },
         {
+            type: "gpu.gauge",
+            name: "GPU",
+            description: "Graphics load, VRAM, temperature and power.",
+            source: Qt.resolvedUrl("widgets/GpuGaugeWidget.qml"),
+            size: [3, 4],
+            minSize: [2, 3],
+            options: [
+                { key: "accent", label: "Colour", type: "accent", default: "gpu" }
+            ]
+        },
+        {
+            type: "gpu.graph",
+            name: "GPU history",
+            description: "Graphics load over time, with clocks, fan and video engines.",
+            source: Qt.resolvedUrl("widgets/GpuGraphWidget.qml"),
+            size: [9, 4],
+            minSize: [3, 2],
+            options: [
+                { key: "accent", label: "Colour", type: "accent", default: "gpu" }
+            ]
+        },
+        {
             type: "memory.graph",
             name: "Memory history",
             description: "RAM usage over the last two minutes.",

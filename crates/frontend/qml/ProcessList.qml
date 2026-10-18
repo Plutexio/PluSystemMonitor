@@ -20,13 +20,15 @@ Item {
         user: { title: "User", width: 112, align: Text.AlignLeft, sort: "user" },
         cpu: { title: "CPU", width: 92, align: Text.AlignRight, sort: "cpu" },
         memory: { title: "Memory", width: 108, align: Text.AlignRight, sort: "memory" },
+        gpu: { title: "GPU", width: 84, align: Text.AlignRight, sort: "gpu" },
+        gpuMemory: { title: "GPU memory", width: 116, align: Text.AlignRight, sort: "gpuMemory" },
         read: { title: "Disk read", width: 108, align: Text.AlignRight, sort: "read" },
         write: { title: "Disk write", width: 108, align: Text.AlignRight, sort: "write" },
         threads: { title: "Threads", width: 82, align: Text.AlignRight, sort: "threads" },
         state: { title: "State", width: 116, align: Text.AlignLeft, sort: "state" },
         nice: { title: "Nice", width: 64, align: Text.AlignRight, sort: "nice" }
     })
-    readonly property var allColumns: ["pid", "user", "cpu", "memory", "read", "write", "threads", "state", "nice"]
+    readonly property var allColumns: ["pid", "user", "cpu", "memory", "gpu", "gpuMemory", "read", "write", "threads", "state", "nice"]
 
     readonly property real sidePadding: 14
     readonly property real minNameWidth: 200
@@ -48,6 +50,8 @@ Item {
         case "user": return row.user
         case "cpu": return row.cpu.toFixed(1) + "%"
         case "memory": return Format.bytes(row.memory)
+        case "gpu": return row.gpu < 0 ? "" : row.gpu.toFixed(0) + "%"
+        case "gpuMemory": return row.gpuMemory < 0 ? "" : Format.bytes(row.gpuMemory)
         case "read": return Format.rate(row.readRate)
         case "write": return Format.rate(row.writeRate)
         case "threads": return row.threads
@@ -64,6 +68,9 @@ Item {
             return row.cpu / Math.max(processes.maxCpu, 5)
         if (key === "memory")
             return row.memory / Math.max(processes.maxMemory, 64 * 1024 * 1024)
+        // GPU share is already relative to the whole card.
+        if (key === "gpu")
+            return Math.max(0, row.gpu) / 100
         return 0
     }
 
@@ -225,6 +232,8 @@ Item {
             required property string state
             required property int nice
             required property bool mine
+            required property real gpu
+            required property real gpuMemory
 
             readonly property bool selected: pid === root.selectedPid
 
@@ -293,7 +302,8 @@ Item {
                             height: 24
                             width: (parent.width - 12) * cell.fraction
                             radius: Math.min(6, width / 2)
-                            color: Qt.alpha(cell.modelData === "cpu" ? Theme.cpu : Theme.memory, 0.22)
+                            color: Qt.alpha(cell.modelData === "cpu" ? Theme.cpu
+                                            : cell.modelData === "gpu" ? Theme.gpu : Theme.memory, 0.22)
 
                             Behavior on width {
                                 NumberAnimation { duration: 400; easing.type: Easing.OutCubic }

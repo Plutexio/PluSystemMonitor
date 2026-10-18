@@ -20,6 +20,19 @@ QtObject {
         return value === 0 ? "" : bytes(value) + "/s"
     }
 
+    function temperature(celsius) {
+        return Math.round(celsius) + " °C"
+    }
+
+    function watts(value) {
+        return Math.round(value) + " W"
+    }
+
+    // "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti": the vendor is implied.
+    function gpuName(name) {
+        return name.replace(/^(NVIDIA )?(GeForce )?|^AMD (Radeon )?/, "") || name
+    }
+
     function processState(letter) {
         switch (letter) {
         case "R": return "Running"

@@ -28,7 +28,7 @@ Window {
     }
 
     width: 1180
-    height: 760
+    height: 860
     minimumWidth: 820
     minimumHeight: 560
     visible: true

@@ -100,6 +100,8 @@ mod tests {
             threads: 1,
             state: 'S',
             nice: 0,
+            gpu: None,
+            gpu_memory: None,
         };
         (info, stats)
     }
