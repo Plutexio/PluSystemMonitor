@@ -18,7 +18,10 @@ pub struct CpuCollector {
 impl CpuCollector {
     pub fn new() -> Result<Self> {
         let (prev_total, prev_cores) = read_stat()?;
-        Ok(Self { prev_total, prev_cores })
+        Ok(Self {
+            prev_total,
+            prev_cores,
+        })
     }
 
     pub fn sample(&mut self) -> Result<CpuSample> {
@@ -74,7 +77,10 @@ fn parse_times(times: &str) -> Times {
         .collect();
     let total: u64 = fields.iter().sum();
     let idle = fields.get(3).copied().unwrap_or(0) + fields.get(4).copied().unwrap_or(0);
-    Times { busy: total - idle, total }
+    Times {
+        busy: total - idle,
+        total,
+    }
 }
 
 #[cfg(test)]
@@ -90,8 +96,14 @@ mod tests {
 
     #[test]
     fn usage_from_delta() {
-        let prev = Times { busy: 100, total: 1000 };
-        let now = Times { busy: 150, total: 1100 };
+        let prev = Times {
+            busy: 100,
+            total: 1000,
+        };
+        let now = Times {
+            busy: 150,
+            total: 1100,
+        };
         assert_eq!(usage(prev, now), 50.0);
         assert_eq!(usage(now, now), 0.0);
     }

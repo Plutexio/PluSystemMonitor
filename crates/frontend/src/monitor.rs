@@ -154,9 +154,14 @@ impl qobject::Monitor {
     fn apply(mut self: Pin<&mut Self>, event: Event) {
         match event {
             Event::Connecting(url) => {
-                self.as_mut().set_status(QString::from(&format!("Connecting to {url}…")));
+                self.as_mut()
+                    .set_status(QString::from(&format!("Connecting to {url}…")));
             }
-            Event::Connected { hostname, interval_ms, history } => {
+            Event::Connected {
+                hostname,
+                interval_ms,
+                history,
+            } => {
                 {
                     let mut rust = self.as_mut().rust_mut();
                     rust.cpu_points.clear();
@@ -180,7 +185,9 @@ impl qobject::Monitor {
             }
             Event::Lost(reason) => {
                 self.as_mut().set_connected(false);
-                self.set_status(QString::from(&format!("Connection lost ({reason}), retrying…")));
+                self.set_status(QString::from(&format!(
+                    "Connection lost ({reason}), retrying…"
+                )));
             }
             Event::Rejected(reason) => {
                 self.as_mut().set_connected(false);

@@ -14,7 +14,7 @@ Rectangle {
     Repeater {
         model: [
             { color: Theme.cpu, size: 1.10, x: 0.15, y: 0.20, dx: 0.25, dy: 0.15, period: 31000 },
-            { color: Theme.mem, size: 0.95, x: 0.70, y: 0.75, dx: -0.30, dy: -0.20, period: 37000 },
+            { color: Theme.memory, size: 0.95, x: 0.70, y: 0.75, dx: -0.30, dy: -0.20, period: 37000 },
             { color: Theme.swap, size: 0.70, x: 0.80, y: 0.05, dx: -0.15, dy: 0.30, period: 43000 }
         ]
 
@@ -39,8 +39,8 @@ Rectangle {
                     centerRadius: blob.diameter / 2
                     focalX: centerX
                     focalY: centerY
-                    GradientStop { position: 0.0; color: Qt.alpha(blob.modelData.color, 0.32) }
-                    GradientStop { position: 0.45; color: Qt.alpha(blob.modelData.color, 0.12) }
+                    GradientStop { position: 0.0; color: Qt.alpha(blob.modelData.color, Theme.backgroundGlow) }
+                    GradientStop { position: 0.45; color: Qt.alpha(blob.modelData.color, Theme.backgroundGlow * 0.375) }
                     GradientStop { position: 1.0; color: Qt.alpha(blob.modelData.color, 0.0) }
                 }
 
@@ -64,8 +64,8 @@ Rectangle {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.0) }
-            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.45) }
+            GradientStop { position: 0.0; color: Qt.alpha(Theme.vignette, 0) }
+            GradientStop { position: 1.0; color: Theme.vignette }
         }
     }
 }

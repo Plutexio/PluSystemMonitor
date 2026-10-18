@@ -12,7 +12,9 @@ pub struct Collector {
 
 impl Collector {
     pub fn new() -> Result<Self> {
-        Ok(Self { cpu: cpu::CpuCollector::new()? })
+        Ok(Self {
+            cpu: cpu::CpuCollector::new()?,
+        })
     }
 
     pub fn sample(&mut self) -> Result<Sample> {
@@ -20,6 +22,10 @@ impl Collector {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        Ok(Sample { timestamp_ms, cpu: self.cpu.sample()?, mem: mem::sample()? })
+        Ok(Sample {
+            timestamp_ms,
+            cpu: self.cpu.sample()?,
+            mem: mem::sample()?,
+        })
     }
 }

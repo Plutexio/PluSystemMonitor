@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
-use plusysmon_protocol::{self as proto, ClientMsg, DEFAULT_PORT, PROTOCOL_VERSION, Sample, ServerMsg};
+use plusysmon_protocol::{
+    self as proto, ClientMsg, DEFAULT_PORT, PROTOCOL_VERSION, Sample, ServerMsg,
+};
 use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -14,7 +16,11 @@ const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 pub enum Event {
     Connecting(String),
-    Connected { hostname: String, interval_ms: u32, history: Vec<Sample> },
+    Connected {
+        hostname: String,
+        interval_ms: u32,
+        history: Vec<Sample>,
+    },
     Sample(Sample),
     /// The connection dropped; a reconnect is scheduled.
     Lost(String),
@@ -74,7 +80,10 @@ async fn session(url: &str, token: &str, on_event: &mut impl FnMut(Event) -> boo
     let (mut ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(url))
         .await
         .context("timed out")??;
-    let hello = ClientMsg::Hello { version: PROTOCOL_VERSION, token: token.to_owned() };
+    let hello = ClientMsg::Hello {
+        version: PROTOCOL_VERSION,
+        token: token.to_owned(),
+    };
     ws.send(Message::binary(proto::encode(&hello))).await?;
 
     while let Some(msg) = ws.next().await {
@@ -84,9 +93,15 @@ async fn session(url: &str, token: &str, on_event: &mut impl FnMut(Event) -> boo
             _ => continue,
         };
         let event = match proto::decode(&bytes).context("malformed message from daemon")? {
-            ServerMsg::Welcome { hostname, interval_ms, history } => {
-                Event::Connected { hostname, interval_ms, history }
-            }
+            ServerMsg::Welcome {
+                hostname,
+                interval_ms,
+                history,
+            } => Event::Connected {
+                hostname,
+                interval_ms,
+                history,
+            },
             ServerMsg::Sample(sample) => Event::Sample(sample),
             ServerMsg::Error(reason) => return Ok(End::Rejected(reason)),
         };
@@ -102,15 +117,23 @@ fn to_url(address: &str) -> String {
     if address.contains("://") {
         return address.to_owned();
     }
-    let has_port = address.rsplit_once(':').is_some_and(|(_, port)| port.parse::<u16>().is_ok())
+    let has_port = address
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| port.parse::<u16>().is_ok())
         && !address.ends_with(']');
-    if has_port { format!("ws://{address}") } else { format!("ws://{address}:{DEFAULT_PORT}") }
+    if has_port {
+        format!("ws://{address}")
+    } else {
+        format!("ws://{address}:{DEFAULT_PORT}")
+    }
 }
 
 pub fn is_local(address: &str) -> bool {
     let host = to_url(address);
     let host = host.split("://").nth(1).unwrap_or_default();
-    ["localhost", "127.0.0.1", "[::1]"].iter().any(|local| host.starts_with(local))
+    ["localhost", "127.0.0.1", "[::1]"]
+        .iter()
+        .any(|local| host.starts_with(local))
 }
 
 #[cfg(test)]

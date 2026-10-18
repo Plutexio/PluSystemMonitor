@@ -12,8 +12,11 @@ cxx = "1"
 cxx-qt = "0.10.0"
 cxx-qt-lib = { version = "0.10.0", features = ["full"] }
 futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "time", "macros", "sync"] }
 tokio-tungstenite.workspace = true
+toml.workspace = true
 
 [build-dependencies]
 cxx-qt-build = "0.10.0"

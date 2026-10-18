@@ -65,13 +65,18 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, rmp_serde::d
     rmp_serde::from_slice(bytes)
 }
 
-/// Where the daemon keeps its access token, so a local frontend can pick it up
-/// without the user copying it around.
-pub fn token_path() -> Option<PathBuf> {
+/// `~/.config/plusysmon`, shared by the daemon and the frontend.
+pub fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("plusysmon").join("token"))
+    Some(base.join("plusysmon"))
+}
+
+/// Where the daemon keeps its access token, so a local frontend can pick it up
+/// without the user copying it around.
+pub fn token_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("token"))
 }
 
 #[cfg(test)]
@@ -82,8 +87,17 @@ mod tests {
     fn roundtrip() {
         let msg = ServerMsg::Sample(Sample {
             timestamp_ms: 42,
-            cpu: CpuSample { total: 12.5, per_core: vec![10.0, 15.0] },
-            mem: MemSample { total: 16, used: 8, available: 8, swap_total: 4, swap_used: 1 },
+            cpu: CpuSample {
+                total: 12.5,
+                per_core: vec![10.0, 15.0],
+            },
+            mem: MemSample {
+                total: 16,
+                used: 8,
+                available: 8,
+                swap_total: 4,
+                swap_used: 1,
+            },
         });
         let ServerMsg::Sample(s) = decode::<ServerMsg>(&encode(&msg)).unwrap() else {
             panic!("wrong variant");

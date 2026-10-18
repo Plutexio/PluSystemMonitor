@@ -76,24 +76,27 @@ fn main() -> Result<()> {
         samples: broadcast::channel(16).0,
     });
 
-    tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
-        let listener = TcpListener::bind(args.listen)
-            .await
-            .with_context(|| format!("binding {}", args.listen))?;
-        info!("listening on ws://{}", args.listen);
-        if !args.listen.ip().is_loopback() {
-            warn!("accepting remote connections; traffic is not encrypted yet");
-        }
-
-        tokio::spawn(sample_loop(shared.clone(), capacity, args.interval_ms));
-        tokio::select! {
-            res = server::serve(listener, shared) => res,
-            _ = shutdown_signal() => {
-                info!("shutting down");
-                Ok(())
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let listener = TcpListener::bind(args.listen)
+                .await
+                .with_context(|| format!("binding {}", args.listen))?;
+            info!("listening on ws://{}", args.listen);
+            if !args.listen.ip().is_loopback() {
+                warn!("accepting remote connections; traffic is not encrypted yet");
             }
-        }
-    })
+
+            tokio::spawn(sample_loop(shared.clone(), capacity, args.interval_ms));
+            tokio::select! {
+                res = server::serve(listener, shared) => res,
+                _ = shutdown_signal() => {
+                    info!("shutting down");
+                    Ok(())
+                }
+            }
+        })
 }
 
 async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: u32) {

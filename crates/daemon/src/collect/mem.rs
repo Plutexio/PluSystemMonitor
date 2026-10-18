@@ -11,7 +11,9 @@ pub fn sample() -> Result<MemSample> {
 fn parse(meminfo: &str) -> MemSample {
     let (mut total, mut available, mut swap_total, mut swap_free) = (0, 0, 0, 0);
     for line in meminfo.lines() {
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let slot = match key {
             "MemTotal" => &mut total,
             "MemAvailable" => &mut available,
@@ -20,7 +22,12 @@ fn parse(meminfo: &str) -> MemSample {
             _ => continue,
         };
         // Values are reported in KiB.
-        *slot = value.trim().trim_end_matches(" kB").parse::<u64>().unwrap_or(0) * 1024;
+        *slot = value
+            .trim()
+            .trim_end_matches(" kB")
+            .parse::<u64>()
+            .unwrap_or(0)
+            * 1024;
     }
     MemSample {
         total,

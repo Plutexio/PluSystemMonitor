@@ -8,7 +8,7 @@ Column {
     property string label
     property real used: 0
     property real total: 0
-    property color color: Theme.mem
+    property color color: Theme.memory
 
     readonly property real fraction: total > 0 ? Math.min(1, used / total) : 0
 

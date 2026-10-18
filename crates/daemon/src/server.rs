@@ -41,31 +41,44 @@ pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
 }
 
 async fn handle(stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) -> Result<()> {
-    let mut ws = tokio_tungstenite::accept_async(stream).await.context("websocket handshake")?;
+    let mut ws = tokio_tungstenite::accept_async(stream)
+        .await
+        .context("websocket handshake")?;
 
     let hello = tokio::time::timeout(HELLO_TIMEOUT, ws.next())
         .await
         .context("no hello received")?
         .context("closed before hello")??;
-    let Message::Binary(bytes) = hello else { bail!("expected a binary hello frame") };
+    let Message::Binary(bytes) = hello else {
+        bail!("expected a binary hello frame")
+    };
     let ClientMsg::Hello { version, token } = proto::decode(&bytes).context("malformed hello")?;
 
     let rejection = if version != PROTOCOL_VERSION {
-        Some(format!("protocol version mismatch: daemon {PROTOCOL_VERSION}, client {version}"))
+        Some(format!(
+            "protocol version mismatch: daemon {PROTOCOL_VERSION}, client {version}"
+        ))
     } else if !token::matches(&shared.token, &token) {
         Some("invalid token".to_owned())
     } else {
         None
     };
     if let Some(reason) = rejection {
-        ws.send(Message::binary(proto::encode(&ServerMsg::Error(reason.clone())))).await.ok();
+        ws.send(Message::binary(proto::encode(&ServerMsg::Error(
+            reason.clone(),
+        ))))
+        .await
+        .ok();
         ws.close(None).await.ok();
         bail!("rejected: {reason}");
     }
 
     let (mut rx, history) = {
         let history = shared.history.lock().unwrap();
-        (shared.samples.subscribe(), history.iter().cloned().collect())
+        (
+            shared.samples.subscribe(),
+            history.iter().cloned().collect(),
+        )
     };
     info!(%peer, "client connected");
     let welcome = ServerMsg::Welcome {
