@@ -1,13 +1,10 @@
 //! Processes grouped into the applications the daemon identified.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use plusysmon_protocol::AppInfo;
 
 use crate::processes::ProcessTable;
-
-/// Points kept for each app's CPU sparkline.
-pub const HISTORY_POINTS: usize = 60;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -80,37 +77,6 @@ pub fn select(mut apps: Vec<App>, sort: &str, filter: &str) -> Vec<App> {
         .then_with(|| a.info.id.cmp(&b.info.id))
     });
     apps
-}
-
-/// Recent CPU use of each app, for sparklines.
-#[derive(Default)]
-pub struct History {
-    points: HashMap<String, VecDeque<f64>>,
-}
-
-impl History {
-    pub fn record(&mut self, apps: &[App]) {
-        self.points
-            .retain(|id, _| apps.iter().any(|app| &app.info.id == id));
-        for app in apps {
-            let points = self.points.entry(app.info.id.clone()).or_default();
-            if points.len() == HISTORY_POINTS {
-                points.pop_front();
-            }
-            points.push_back(app.cpu);
-        }
-    }
-
-    pub fn get(&self, id: &str) -> Vec<f64> {
-        self.points
-            .get(id)
-            .map(|p| p.iter().copied().collect())
-            .unwrap_or_default()
-    }
-
-    pub fn clear(&mut self) {
-        self.points.clear();
-    }
 }
 
 #[cfg(test)]
@@ -210,16 +176,5 @@ mod tests {
             ["A Game", "Zen Browser"]
         );
         assert_eq!(names(select(apps, "name", "zen")), ["Zen Browser"]);
-    }
-
-    #[test]
-    fn keeps_history_for_live_apps() {
-        let (apps, _) = group(&table());
-        let mut history = History::default();
-        history.record(&apps);
-        history.record(&apps);
-        assert_eq!(history.get("steam:42"), [40.0, 40.0]);
-        history.record(&apps[..0]);
-        assert!(history.get("steam:42").is_empty());
     }
 }

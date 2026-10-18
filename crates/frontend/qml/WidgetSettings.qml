@@ -222,8 +222,13 @@ GlassPopup {
                             id: picker
                             monitor: root.monitor
                             taken: sourceList.list
-                            onPicked: id => root.set(option.modelData.key,
-                                parent.swap ? [id] : sourceList.list.concat([id]))
+                            onPicked: id => {
+                                // A widget about one app is best titled after it.
+                                const picked = Sources.catalog(root.monitor).find(s => s.id === id)
+                                if (picked && picked.app && "title" in root.values && !root.values.title)
+                                    root.set("title", picked.app)
+                                root.set(option.modelData.key, parent.swap ? [id] : sourceList.list.concat([id]))
+                            }
                         }
                     }
 

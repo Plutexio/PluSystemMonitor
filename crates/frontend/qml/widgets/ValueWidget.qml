@@ -24,11 +24,21 @@ Card {
         height: parent.height * 0.55
         visible: root.source !== null && root.source.available
         values: root.source ? root.source.history : []
-        maxValue: root.source && root.source.max > 0 ? root.source.max : 1
+        // The number says how much; the sparkline only needs to show the shape.
+        maxValue: Sources.scale(root.source, true)
         interval: root.monitor.intervalMs
         color: root.tint
         showGrid: false
         fillOpacity: 0.6
+    }
+
+    Text {
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        visible: !root.source || !root.source.available
+        text: Sources.absence(root.source, root.monitor)
+        color: Theme.textDim
+        font.pixelSize: 12
     }
 
     Text {

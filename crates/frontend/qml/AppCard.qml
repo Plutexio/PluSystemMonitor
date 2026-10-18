@@ -199,7 +199,7 @@ Item {
                 width: parent.width
                 height: card.hasArt ? 26 : Math.max(26, parent.height - title.height - numbers.height - 26)
                 values: card.history
-                maxPoints: 60
+                maxPoints: 120
                 // Scale to the app's own peak so quiet apps still show their rhythm.
                 maxValue: Math.max(2, card.peak) * 1.15
                 interval: card.interval

@@ -43,7 +43,7 @@ Card {
                 anchors.fill: parent
                 visible: source !== null && source.available
                 values: source ? source.history : []
-                maxValue: source && source.max > 0 ? source.max : 1
+                maxValue: Sources.scale(source, root.options.fit)
                 interval: root.monitor.intervalMs
                 color: root.colors[index] ?? Theme.cpu
                 showGrid: index === 0
@@ -97,8 +97,7 @@ Card {
     Text {
         anchors.centerIn: parent
         visible: !root.main || !root.main.available
-        text: !root.main ? "Pick sources in the widget's settings"
-              : root.monitor.connected ? "Not available on this machine" : "Waiting for data…"
+        text: Sources.absence(root.main, root.monitor)
         color: Theme.textDim
         font.pixelSize: 13
     }

@@ -63,11 +63,21 @@ Widgets don't hard-code what they show. Every number the daemon reports is a
 history: `cpu.total`, `cpu.core.3`, `memory.used`, `memory.swap`,
 `gpu.0.usage`, `gpu.0.vram`, `gpu.0.temperature`, `gpu.0.power`,
 `gpu.0.core_clock`, `gpu.0.memory_clock`, `gpu.0.fan`, `gpu.0.encoder`,
-`gpu.0.decoder` (the GPU ones exist when the driver reports them). The generic
-widgets show whichever sources you pick in their settings:
+`gpu.0.decoder` (the GPU ones exist when the driver reports them).
+
+Apps are sources too: `app.<app id>.cpu`, `.memory`, `.gpu` and `.vram` for
+every running app (e.g. `app.steam:1062090.gpu`), and `game.cpu`,
+`game.memory`, `game.gpu`, `game.vram` for **whichever game is running** (the
+one using the most GPU). A game widget can be set up before any game runs; its
+title follows the game. Using app or game sources makes the daemon collect
+processes while the Overview is open.
+
+The generic widgets show whichever sources you pick in their settings:
 
 - **Gauge**: the first source on a ring, the others as bars below it.
-- **Graph**: up to four sources over time, each scaled to its own range.
+- **Graph**: up to four sources over time, each scaled to its own range, or
+  to its recent peak with "Fit lines to their data" (handy for one app's
+  share of the CPU, which is small next to the whole machine).
 - **Value**: one source as a big number with a sparkline.
 
 The title comes from the first source unless you type your own; colours follow

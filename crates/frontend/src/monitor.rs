@@ -272,7 +272,7 @@ use serde_json::json;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
-use crate::apps::{self, History};
+use crate::apps;
 use crate::assets::AssetCache;
 use crate::client::{self, Command, Event};
 use crate::metrics::Metrics;
@@ -296,7 +296,6 @@ pub struct MonitorRust {
     commands: Option<UnboundedSender<Command>>,
     metrics: Metrics,
     processes: ProcessTable,
-    app_history: History,
     assets: AssetCache,
 }
 
@@ -318,7 +317,6 @@ impl Default for MonitorRust {
             commands: None,
             metrics: Metrics::default(),
             processes: ProcessTable::default(),
-            app_history: History::default(),
             assets: AssetCache::default(),
         }
     }
@@ -488,7 +486,7 @@ impl qobject::Monitor {
     }
 
     pub(crate) fn app_history(&self, id: &str) -> Vec<f64> {
-        self.rust().app_history.get(id)
+        self.rust().metrics.history(&format!("app.{id}.cpu"))
     }
 
     pub fn process_details(&self, pid: i32) -> QString {
@@ -515,7 +513,8 @@ impl qobject::Monitor {
 
     fn clear_processes(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().processes.clear();
-        self.as_mut().rust_mut().app_history.clear();
+        self.as_mut().rust_mut().metrics.record_apps(&[]);
+        self.as_mut().publish_metrics();
         self.as_mut().set_process_count(0);
         self.processes_updated();
     }
@@ -564,7 +563,7 @@ impl qobject::Monitor {
                         .collect();
                     rust.processes.apply(update);
                     let (apps, _) = apps::group(&rust.processes);
-                    rust.app_history.record(&apps);
+                    rust.metrics.record_apps(&apps);
                     let fetch: Vec<String> = keys
                         .into_iter()
                         .filter(|key| rust.assets.should_fetch(key))
@@ -574,6 +573,7 @@ impl qobject::Monitor {
                 for key in fetch {
                     self.command(Command::Asset { key });
                 }
+                self.as_mut().publish_metrics();
                 self.as_mut().set_process_count(count);
                 self.processes_updated();
             }
@@ -622,6 +622,12 @@ impl qobject::Monitor {
     fn show(mut self: Pin<&mut Self>, sample: &Sample) {
         let cores: Vec<f64> = sample.cpu.per_core.iter().map(|&c| c as f64).collect();
         self.as_mut().set_cpu_cores(QList::from(cores));
+        self.publish_metrics();
+    }
+
+    /// Tells QML that sources changed: the catalog if its contents did, and the
+    /// revision that `metric()` bindings depend on.
+    fn publish_metrics(mut self: Pin<&mut Self>) {
         let catalog = self.rust().metrics.catalog();
         if self.metric_catalog().to_string() != catalog {
             self.as_mut().set_metric_catalog(QString::from(&catalog));

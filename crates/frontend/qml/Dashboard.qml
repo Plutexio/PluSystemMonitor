@@ -10,6 +10,8 @@ Flickable {
     property bool editing: false
     property int columns: 12
     property int usedRows: 1
+    /// Some widget shows app or game sources, which come from the process stream.
+    property bool usesProcesses: false
     // Bumped on every change so bindings that scan the model re-evaluate.
     property int revision: 0
 
@@ -53,6 +55,10 @@ Flickable {
         }
         usedRows = rows
         revision++
+        let processes = false
+        for (let i = 0; i < widgets.count; i++)
+            processes = processes || Sources.needsProcesses(JSON.parse(widgets.get(i).options).sources)
+        usesProcesses = processes
     }
 
     function load(json) {
@@ -113,7 +119,7 @@ Flickable {
 
     function setOptions(index, values) {
         widgets.setProperty(index, "options", JSON.stringify(values))
-        revision++
+        updateRows()
         edited()
     }
 

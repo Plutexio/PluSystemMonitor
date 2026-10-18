@@ -1,12 +1,18 @@
 //! Data sources for widgets: every number a sample carries, under a stable ID
 //! (`cpu.total`, `gpu.0.temperature`, ...), with a name, a unit, a scale and
 //! recent history. Widgets pick sources by ID and never know where they come from.
+//!
+//! Besides the machine itself there are sources per running app
+//! (`app.<app id>.gpu`) and for whichever game is running (`game.gpu`); those
+//! come from the process stream rather than from samples.
 
 use std::collections::{HashMap, VecDeque};
 
-use plusysmon_protocol::Sample;
+use plusysmon_protocol::{AppKind, Sample};
 use serde::Serialize;
 use serde_json::json;
+
+use crate::apps::App;
 
 /// Points kept per source (two minutes at the default interval).
 pub const HISTORY_POINTS: usize = 120;
@@ -30,6 +36,9 @@ pub struct Definition {
     pub unit: Unit,
     /// Theme accent that suits the source (cpu, memory, swap, gpu).
     pub accent: &'static str,
+    /// For sources of one specific app: its name, a good widget title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
 }
 
 struct Series {
@@ -42,8 +51,16 @@ struct Series {
 
 #[derive(Default)]
 pub struct Metrics {
-    definitions: Vec<Definition>,
+    /// From samples: CPU, memory, GPUs.
+    system: Vec<Definition>,
+    /// From the process stream: apps and the current game.
+    apps: Vec<Definition>,
+    /// Every definition seen this session, so a widget whose app has quit
+    /// still knows what it was showing.
+    known: HashMap<String, Definition>,
     series: HashMap<String, Series>,
+    ram_total: u64,
+    vram_total: u64,
 }
 
 struct Reading {
@@ -54,18 +71,49 @@ struct Reading {
 
 impl Metrics {
     pub fn clear(&mut self) {
-        self.definitions.clear();
+        self.system.clear();
+        self.apps.clear();
         self.series.clear();
     }
 
     pub fn record(&mut self, sample: &Sample) {
+        self.ram_total = sample.mem.total;
+        self.vram_total = sample.gpus.iter().map(|g| g.memory_total).sum();
         let readings = read(sample);
-        let ids: Vec<&str> = readings.iter().map(|r| r.definition.id.as_str()).collect();
-        let current: Vec<&str> = self.definitions.iter().map(|d| d.id.as_str()).collect();
-        if ids != current {
-            self.definitions = readings.iter().map(|r| r.definition.clone()).collect();
-            self.series
-                .retain(|id, _| readings.iter().any(|r| &r.definition.id == id));
+        let system = std::mem::take(&mut self.system);
+        self.system = self.apply(system, readings);
+    }
+
+    /// Updates the app and current-game sources; call with every process update.
+    pub fn record_apps(&mut self, apps: &[App]) {
+        let readings = read_apps(apps, self.ram_total, self.vram_total);
+        let current = std::mem::take(&mut self.apps);
+        self.apps = self.apply(current, readings);
+    }
+
+    /// Stores `readings`, replacing the definitions of one group; series of
+    /// sources that disappeared from the group are dropped.
+    fn apply(
+        &mut self,
+        mut definitions: Vec<Definition>,
+        readings: Vec<Reading>,
+    ) -> Vec<Definition> {
+        let changed = definitions.len() != readings.len()
+            || definitions
+                .iter()
+                .zip(&readings)
+                .any(|(d, r)| *d != r.definition);
+        if changed {
+            for gone in definitions
+                .iter()
+                .filter(|d| !readings.iter().any(|r| r.definition.id == d.id))
+            {
+                self.series.remove(&gone.id);
+            }
+            definitions = readings.iter().map(|r| r.definition.clone()).collect();
+            for definition in &definitions {
+                self.known.insert(definition.id.clone(), definition.clone());
+            }
         }
         for reading in readings {
             let series = self
@@ -85,18 +133,51 @@ impl Metrics {
             series.max = reading.max;
             series.peak = series.peak.max(reading.value);
         }
+        definitions
     }
 
-    /// Every source, for the picker.
+    /// Every source available right now, for the picker. The current-game
+    /// sources are always offered, so a game widget can be set up beforehand.
     pub fn catalog(&self) -> String {
-        serde_json::to_string(&self.definitions).expect("definitions serialize")
+        let placeholders: Vec<Definition> = if self.apps.iter().any(|d| d.id.starts_with("game.")) {
+            Vec::new()
+        } else {
+            GAME_SOURCES
+                .iter()
+                .filter_map(|(key, _)| game_placeholder(&format!("game.{key}")))
+                .collect()
+        };
+        let all: Vec<&Definition> = self
+            .system
+            .iter()
+            .chain(&placeholders)
+            .chain(&self.apps)
+            .collect();
+        serde_json::to_string(&all).expect("definitions serialize")
     }
 
-    /// One source's definition, current value, scale and history; `None` if
-    /// this machine doesn't have it (e.g. a GPU source on a GPU-less box).
+    /// One source's definition, current value, scale and history. A source seen
+    /// earlier but gone now (its app quit) comes back with `available: false`;
+    /// one never seen gives `None`.
     pub fn get(&self, id: &str) -> Option<String> {
-        let definition = self.definitions.iter().find(|d| d.id == id)?;
-        let series = self.series.get(id)?;
+        let current = self.system.iter().chain(&self.apps).find(|d| d.id == id);
+        let Some((definition, series)) = current.zip(self.series.get(id)) else {
+            // Without a game, its sources keep their generic names rather than
+            // the last game's.
+            let placeholder = game_placeholder(id);
+            let definition = placeholder.as_ref().or_else(|| self.known.get(id))?;
+            return Some(
+                json!({
+                    "id": definition.id,
+                    "name": definition.name,
+                    "category": definition.category,
+                    "unit": definition.unit,
+                    "accent": definition.accent,
+                    "available": false,
+                })
+                .to_string(),
+            );
+        };
         let max = if series.max > 0.0 {
             series.max
         } else {
@@ -109,6 +190,7 @@ impl Metrics {
                 "category": definition.category,
                 "unit": definition.unit,
                 "accent": definition.accent,
+                "available": true,
                 "value": series.value,
                 "max": max,
                 "history": series.history,
@@ -116,6 +198,110 @@ impl Metrics {
             .to_string(),
         )
     }
+
+    pub fn history(&self, id: &str) -> Vec<f64> {
+        self.series
+            .get(id)
+            .map(|s| s.history.iter().copied().collect())
+            .unwrap_or_default()
+    }
+}
+
+/// The per-app metrics: ID suffix and the word used in names.
+const GAME_SOURCES: [(&str, &str); 4] = [
+    ("cpu", "CPU"),
+    ("memory", "memory"),
+    ("gpu", "GPU"),
+    ("vram", "VRAM"),
+];
+
+/// "game.gpu" while no game runs: named "Game GPU".
+fn game_placeholder(id: &str) -> Option<Definition> {
+    let key = id.strip_prefix("game.")?;
+    let (_, what) = GAME_SOURCES.iter().find(|(k, _)| *k == key)?;
+    let (unit, accent) = match key {
+        "cpu" => (Unit::Percent, "cpu"),
+        "gpu" => (Unit::Percent, "gpu"),
+        _ => (Unit::Bytes, "memory"),
+    };
+    Some(Definition {
+        id: id.to_owned(),
+        name: format!("Game {what}"),
+        category: "Current game".to_owned(),
+        unit,
+        accent,
+        app: None,
+    })
+}
+
+/// Per app: CPU, memory, GPU and VRAM. Plus the same four for the current game
+/// (the running game using the most GPU), which follow whatever game that is.
+fn read_apps(apps: &[App], ram_total: u64, vram_total: u64) -> Vec<Reading> {
+    let mut readings = Vec::new();
+    let mut add_four =
+        |prefix: &str, name: &str, category: &str, app_name: Option<&str>, app: &App| {
+            let metrics = [
+                ("cpu", "CPU", Unit::Percent, "cpu", app.cpu, 100.0),
+                (
+                    "memory",
+                    "memory",
+                    Unit::Bytes,
+                    "memory",
+                    app.memory as f64,
+                    ram_total as f64,
+                ),
+                ("gpu", "GPU", Unit::Percent, "gpu", app.gpu, 100.0),
+                (
+                    "vram",
+                    "VRAM",
+                    Unit::Bytes,
+                    "memory",
+                    app.gpu_memory as f64,
+                    vram_total as f64,
+                ),
+            ];
+            for (key, what, unit, accent, value, max) in metrics {
+                readings.push(Reading {
+                    definition: Definition {
+                        id: format!("{prefix}.{key}"),
+                        name: format!("{name} {what}"),
+                        category: category.to_owned(),
+                        unit,
+                        accent,
+                        app: app_name.map(str::to_owned),
+                    },
+                    value,
+                    max,
+                });
+            }
+        };
+
+    let game = apps
+        .iter()
+        .filter(|a| a.info.kind == AppKind::Game)
+        .max_by(|a, b| a.gpu.total_cmp(&b.gpu).then(a.cpu.total_cmp(&b.cpu)));
+    if let Some(game) = game {
+        // The name changes with the game, so the widget title does too.
+        add_four("game", &game.info.name, "Current game", None, game);
+    }
+
+    let mut sorted: Vec<&App> = apps.iter().collect();
+    sorted.sort_by_key(|app| app.info.name.to_lowercase());
+    for app in sorted {
+        let category = match app.info.kind {
+            AppKind::Game => format!("Games · {}", app.info.name),
+            AppKind::App => format!("Apps · {}", app.info.name),
+        };
+        let prefix = format!("app.{}", app.info.id);
+        add_four(
+            &prefix,
+            &app.info.name,
+            &category,
+            Some(&app.info.name),
+            app,
+        );
+    }
+    readings
 }
 
 fn read(sample: &Sample) -> Vec<Reading> {
@@ -128,6 +314,7 @@ fn read(sample: &Sample) -> Vec<Reading> {
                 category: category.to_owned(),
                 unit,
                 accent,
+                app: None,
             },
             value,
             max,
@@ -325,7 +512,11 @@ mod tests {
                 "gpu.0.vram",
                 "gpu.0.temperature",
                 "gpu.0.power",
-                "gpu.0.core_clock"
+                "gpu.0.core_clock",
+                "game.cpu",
+                "game.memory",
+                "game.gpu",
+                "game.vram"
             ]
         );
         assert_eq!(catalog[6]["name"], "RTX 5070 Ti temperature");
@@ -360,6 +551,96 @@ mod tests {
         without_gpu.gpus.clear();
         metrics.record(&without_gpu);
         assert_ne!(metrics.catalog(), catalog);
-        assert!(metrics.get("gpu.0.usage").is_none());
+        // Known from before, so widgets can still name it.
+        let gone = get(&metrics, "gpu.0.usage");
+        assert_eq!(gone["available"], false);
+        assert_eq!(gone["name"], "RTX 5070 Ti usage");
+        assert!(metrics.get("never.seen").is_none());
+    }
+
+    fn app(id: &str, name: &str, kind: AppKind, cpu: f64, gpu: f64) -> App {
+        App {
+            info: plusysmon_protocol::AppInfo {
+                id: id.into(),
+                name: name.into(),
+                kind,
+                icon: None,
+                art: None,
+                logo: None,
+            },
+            cpu,
+            memory: 512,
+            read_rate: 0,
+            write_rate: 0,
+            gpu,
+            gpu_memory: 4,
+            pids: vec![1],
+        }
+    }
+
+    #[test]
+    fn offers_app_and_current_game_sources() {
+        let mut metrics = Metrics::default();
+        metrics.record(&sample(10.0, 2000));
+        metrics.record_apps(&[
+            app("desktop:zen", "Zen Browser", AppKind::App, 3.0, 1.0),
+            app("steam:1", "Old Game", AppKind::Game, 1.0, 5.0),
+            app("steam:2", "Big Game", AppKind::Game, 20.0, 90.0),
+        ]);
+
+        let gpu = get(&metrics, "app.steam:2.gpu");
+        assert_eq!(gpu["name"], "Big Game GPU");
+        assert_eq!(gpu["value"], 90.0);
+        assert_eq!(get(&metrics, "app.desktop:zen.memory")["max"], 1000.0);
+        assert_eq!(get(&metrics, "app.steam:2.vram")["max"], 16.0);
+
+        // The current game is the one working the GPU hardest.
+        let game = get(&metrics, "game.gpu");
+        assert_eq!(game["name"], "Big Game GPU");
+        assert_eq!(game["category"], "Current game");
+
+        let catalog: Vec<Value> = serde_json::from_str(&metrics.catalog()).unwrap();
+        let zen = catalog
+            .iter()
+            .find(|d| d["id"] == "app.desktop:zen.cpu")
+            .unwrap();
+        assert_eq!(zen["app"], "Zen Browser");
+        assert_eq!(zen["category"], "Apps · Zen Browser");
+        let current = catalog.iter().find(|d| d["id"] == "game.cpu").unwrap();
+        assert!(current.get("app").is_none());
+        // System sources stay.
+        assert_eq!(get(&metrics, "cpu.total")["value"], 10.0);
+    }
+
+    #[test]
+    fn offers_game_sources_before_any_game_runs() {
+        let mut metrics = Metrics::default();
+        metrics.record(&sample(10.0, 2000));
+        let catalog: Vec<Value> = serde_json::from_str(&metrics.catalog()).unwrap();
+        let game: Vec<&str> = catalog
+            .iter()
+            .filter(|d| d["category"] == "Current game")
+            .map(|d| d["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(game, ["Game CPU", "Game memory", "Game GPU", "Game VRAM"]);
+        assert_eq!(get(&metrics, "game.vram")["available"], false);
+    }
+
+    #[test]
+    fn app_sources_go_and_keep_their_names() {
+        let mut metrics = Metrics::default();
+        metrics.record(&sample(10.0, 2000));
+        metrics.record_apps(&[app("steam:2", "Big Game", AppKind::Game, 20.0, 90.0)]);
+        metrics.record_apps(&[app("steam:2", "Big Game", AppKind::Game, 30.0, 80.0)]);
+        assert_eq!(metrics.history("app.steam:2.cpu"), [20.0, 30.0]);
+
+        metrics.record_apps(&[]);
+        let gone = get(&metrics, "app.steam:2.gpu");
+        assert_eq!(gone["available"], false);
+        assert_eq!(gone["name"], "Big Game GPU");
+        let game = get(&metrics, "game.gpu");
+        assert_eq!(game["available"], false);
+        assert_eq!(game["name"], "Game GPU");
+        assert!(metrics.history("app.steam:2.cpu").is_empty());
     }
 }

@@ -34,6 +34,7 @@ QtObject {
                 { key: "sources", label: "Sources", type: "sources", default: ["cpu.total"], min: 1, max: 4,
                   hint: "Each line is scaled to its own range." },
                 { key: "title", label: "Title", type: "text", default: "", placeholder: "Name of the first source" },
+                { key: "fit", label: "Fit lines to their data", type: "bool", default: false },
                 { key: "accent", label: "Colour of the first line", type: "accent", default: "auto" }
             ]
         },

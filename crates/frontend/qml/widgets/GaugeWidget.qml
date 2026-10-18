@@ -28,8 +28,7 @@ Card {
         visible: !root.main || !root.main.available
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
-        text: !root.main ? "Pick a source in the widget's settings"
-              : root.monitor.connected ? "Not available on this machine" : "Waiting for data…"
+        text: Sources.absence(root.main, root.monitor)
         color: Theme.textDim
         font.pixelSize: 13
     }

@@ -37,8 +37,8 @@ Window {
 
     Monitor {
         id: monitor
-        // Apps are built from processes too.
-        processesEnabled: header.page !== 0
+        // Apps are built from processes too, as are app and game widget sources.
+        processesEnabled: header.page !== 0 || dashboard.usesProcesses
     }
 
     Background {
