@@ -20,6 +20,18 @@ QtObject {
         return value === 0 ? "" : bytes(value) + "/s"
     }
 
+    // A data source's value in its unit (see metrics.rs `Unit`).
+    function metric(value, unit) {
+        switch (unit) {
+        case "percent": return value.toFixed(value < 10 ? 1 : 0) + "%"
+        case "bytes": return bytes(value)
+        case "celsius": return temperature(value)
+        case "watts": return watts(value)
+        case "megahertz": return Math.round(value) + " MHz"
+        }
+        return value.toFixed(1)
+    }
+
     function temperature(celsius) {
         return Math.round(celsius) + " °C"
     }

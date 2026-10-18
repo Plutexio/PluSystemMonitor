@@ -141,6 +141,7 @@ Window {
     WidgetSettings {
         id: widgetSettings
         anchors.centerIn: parent
+        monitor: monitor
         onValuesEdited: values => dashboard.setOptions(index, values)
     }
 

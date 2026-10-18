@@ -6,6 +6,7 @@ fn main() {
             .qml_file(QmlFile::from("qml/Theme.qml").singleton(true))
             .qml_file(QmlFile::from("qml/Widgets.qml").singleton(true))
             .qml_file(QmlFile::from("qml/Format.qml").singleton(true))
+            .qml_file(QmlFile::from("qml/Sources.qml").singleton(true))
             .qml_files([
                 "qml/Main.qml",
                 "qml/Background.qml",
@@ -15,7 +16,6 @@ fn main() {
                 "qml/Card.qml",
                 "qml/RingGauge.qml",
                 "qml/LiveGraph.qml",
-                "qml/UsageBar.qml",
                 "qml/CoreBars.qml",
                 "qml/Icon.qml",
                 "qml/GlassButton.qml",
@@ -37,14 +37,12 @@ fn main() {
                 "qml/AppDetails.qml",
                 "qml/AppIcon.qml",
                 "qml/RoundedImage.qml",
-                "qml/StatChip.qml",
-                "qml/widgets/GpuGaugeWidget.qml",
-                "qml/widgets/GpuGraphWidget.qml",
-                "qml/widgets/CpuGaugeWidget.qml",
-                "qml/widgets/CpuGraphWidget.qml",
                 "qml/widgets/CpuCoresWidget.qml",
-                "qml/widgets/MemoryGaugeWidget.qml",
-                "qml/widgets/MemoryGraphWidget.qml",
+                "qml/widgets/GaugeWidget.qml",
+                "qml/widgets/GraphWidget.qml",
+                "qml/widgets/ValueWidget.qml",
+                "qml/MetricBar.qml",
+                "qml/SourcePicker.qml",
             ]),
     )
     .qt_module("Quick")

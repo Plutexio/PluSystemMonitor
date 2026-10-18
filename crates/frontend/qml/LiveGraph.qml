@@ -13,6 +13,9 @@ Item {
     property real maxValue: 100
     property int interval: 1000
     property color color: Theme.cpu
+    /// Off for series overlaid on another graph, so the grid isn't drawn twice.
+    property bool showGrid: true
+    property real fillOpacity: 1
 
     readonly property real step: width / Math.max(1, maxPoints - 1)
     property list<point> linePoints
@@ -41,7 +44,7 @@ Item {
     onHeightChanged: rebuild()
 
     Repeater {
-        model: 3
+        model: root.showGrid ? 3 : 0
 
         Rectangle {
             required property int index
@@ -74,7 +77,7 @@ Item {
                 fillGradient: LinearGradient {
                     y1: 0
                     y2: root.height
-                    GradientStop { position: 0.0; color: Qt.alpha(root.color, 0.38) }
+                    GradientStop { position: 0.0; color: Qt.alpha(root.color, 0.38 * root.fillOpacity) }
                     GradientStop { position: 1.0; color: Qt.alpha(root.color, 0.0) }
                 }
                 PathPolyline { path: root.fillPoints }

@@ -4,6 +4,7 @@ mod assets;
 mod client;
 mod config;
 mod layout;
+mod metrics;
 mod monitor;
 mod paths;
 mod prefs;

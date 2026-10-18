@@ -40,6 +40,8 @@ pub enum OptionValue {
     Int(i64),
     Float(f64),
     Text(String),
+    /// Data source IDs, for example.
+    List(Vec<String>),
 }
 
 impl Layout {
@@ -94,13 +96,55 @@ pub fn load(path: &Path) -> Loaded {
         .map_err(anyhow::Error::from)
         .and_then(|layout| layout.validate().map(|()| layout));
     match parsed {
-        Ok(layout) => Loaded::Ok(layout),
+        Ok(mut layout) => {
+            layout.widgets.iter_mut().for_each(migrate);
+            Loaded::Ok(layout)
+        }
         Err(e) => {
             // Keep the user's file instead of silently overwriting it on the next save.
             let _ = fs::rename(path, path.with_extension("toml.broken"));
             Loaded::Broken(format!("{}: {e:#}", path.display()))
         }
     }
+}
+
+/// Widgets from before data sources existed become the generic module that
+/// shows the same thing; their other options (accent) carry over.
+fn migrate(widget: &mut Widget) {
+    let (kind, sources): (&str, &[&str]) = match widget.kind.as_str() {
+        "cpu.gauge" => ("gauge", &["cpu.total"]),
+        "cpu.graph" => ("graph", &["cpu.total"]),
+        "memory.gauge" => {
+            let swap = widget.options.get("showSwap") != Some(&OptionValue::Bool(false));
+            (
+                "gauge",
+                if swap {
+                    &["memory.used", "memory.swap"]
+                } else {
+                    &["memory.used"]
+                },
+            )
+        }
+        "memory.graph" => ("graph", &["memory.used"]),
+        "gpu.gauge" => (
+            "gauge",
+            &[
+                "gpu.0.usage",
+                "gpu.0.vram",
+                "gpu.0.temperature",
+                "gpu.0.power",
+            ],
+        ),
+        "gpu.graph" => ("graph", &["gpu.0.usage"]),
+        _ => return,
+    };
+    widget.kind = kind.to_owned();
+    widget.options.remove("showSwap");
+    widget.options.remove("showCores");
+    let sources = sources.iter().map(|s| (*s).to_owned()).collect();
+    widget
+        .options
+        .insert("sources".to_owned(), OptionValue::List(sources));
 }
 
 #[cfg(test)]
@@ -111,7 +155,7 @@ mod tests {
     fn default_is_valid() {
         let layout = Layout::builtin_default();
         layout.validate().unwrap();
-        assert_eq!(layout.widgets.len(), 6);
+        assert_eq!(layout.widgets.len(), 7);
     }
 
     #[test]
@@ -126,6 +170,33 @@ mod tests {
         assert_eq!(layout.widgets[0].options["points"], OptionValue::Int(90));
         let back: Layout = toml::from_str(&layout.to_toml()).unwrap();
         assert_eq!(back, layout);
+    }
+
+    #[test]
+    fn migrates_fixed_widgets_to_sources() {
+        let dir = std::env::temp_dir().join(format!("plusysmon-migrate-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("layout.toml");
+        fs::write(
+            &path,
+            "columns = 12\n\
+             [[widgets]]\ntype = \"memory.gauge\"\nx = 0\ny = 0\nw = 3\nh = 4\n\
+             [widgets.options]\nshowSwap = false\naccent = \"swap\"\n\
+             [[widgets]]\ntype = \"cpu.cores\"\nx = 3\ny = 0\nw = 3\nh = 2\n",
+        )
+        .unwrap();
+        let Loaded::Ok(layout) = load(&path) else {
+            panic!("layout should load");
+        };
+        let gauge = &layout.widgets[0];
+        assert_eq!(gauge.kind, "gauge");
+        assert_eq!(
+            gauge.options["sources"],
+            OptionValue::List(vec!["memory.used".into()])
+        );
+        assert_eq!(gauge.options["accent"], OptionValue::Text("swap".into()));
+        assert!(!gauge.options.contains_key("showSwap"));
+        assert_eq!(layout.widgets[1].kind, "cpu.cores");
     }
 
     #[test]

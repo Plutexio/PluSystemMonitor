@@ -56,9 +56,41 @@ corner handle, change their options and add or remove them. The result is saved
 to `~/.config/plusysmon/layout.toml`. A layout file that can't be read is moved
 to `layout.toml.broken` and the default layout is used.
 
-Adding a widget type: create `crates/frontend/qml/widgets/MyWidget.qml` (it gets
-`monitor` and `options`), register it in `qml/Widgets.qml` with its sizes and
-options, and list the file in `crates/frontend/build.rs`.
+### Widgets and data sources
+
+Widgets don't hard-code what they show. Every number the daemon reports is a
+**data source** with an ID, a name, a unit, a scale and two minutes of
+history: `cpu.total`, `cpu.core.3`, `memory.used`, `memory.swap`,
+`gpu.0.usage`, `gpu.0.vram`, `gpu.0.temperature`, `gpu.0.power`,
+`gpu.0.core_clock`, `gpu.0.memory_clock`, `gpu.0.fan`, `gpu.0.encoder`,
+`gpu.0.decoder` (the GPU ones exist when the driver reports them). The generic
+widgets show whichever sources you pick in their settings:
+
+- **Gauge**: the first source on a ring, the others as bars below it.
+- **Graph**: up to four sources over time, each scaled to its own range.
+- **Value**: one source as a big number with a sparkline.
+
+The title comes from the first source unless you type your own; colours follow
+the sources unless you pick one. In `layout.toml`:
+
+```toml
+[[widgets]]
+type = "graph"
+x = 0
+y = 0
+w = 6
+h = 4
+options = { sources = ["gpu.0.usage", "gpu.0.temperature"], title = "Gaming" }
+```
+
+Layouts made before data sources existed (`cpu.gauge`, `gpu.graph`, ...) are
+converted to these widgets when loaded.
+
+New sources are added in `crates/frontend/src/metrics.rs`; every widget can
+use them right away. A new kind of widget is a QML file in
+`crates/frontend/qml/widgets/` (it gets `monitor` and `options`, and reads
+sources with `Sources.read`), an entry in `qml/Widgets.qml`, and a line in
+`crates/frontend/build.rs`.
 
 ## GPUs
 

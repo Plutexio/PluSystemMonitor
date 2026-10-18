@@ -1,45 +1,60 @@
 # The dashboard a fresh install starts with. Positions are in grid cells.
+# Generic widgets (gauge, graph, value) show the data sources listed in
+# `sources`; the first one gives the widget its title unless `title` is set.
 
 columns = 12
 
 [[widgets]]
-type = "cpu.gauge"
+type = "gauge"
 x = 0
+y = 0
+w = 3
+h = 4
+options = { sources = ["cpu.total"] }
+
+[[widgets]]
+type = "graph"
+x = 3
+y = 0
+w = 6
+h = 4
+options = { sources = ["cpu.total"] }
+
+[[widgets]]
+type = "cpu.cores"
+x = 9
 y = 0
 w = 3
 h = 4
 
 [[widgets]]
-type = "cpu.graph"
-x = 3
-y = 0
-w = 9
-h = 4
-
-[[widgets]]
-type = "memory.gauge"
+type = "gauge"
 x = 0
 y = 4
 w = 3
 h = 4
+options = { sources = ["memory.used", "memory.swap"] }
 
 [[widgets]]
-type = "memory.graph"
+type = "graph"
 x = 3
 y = 4
 w = 9
 h = 4
+options = { sources = ["memory.used"] }
 
 [[widgets]]
-type = "gpu.gauge"
+type = "gauge"
 x = 0
 y = 8
 w = 3
 h = 4
+options = { sources = ["gpu.0.usage", "gpu.0.vram"] }
 
 [[widgets]]
-type = "gpu.graph"
+type = "graph"
 x = 3
 y = 8
 w = 9
 h = 4
+options = { sources = ["gpu.0.usage", "gpu.0.temperature"] }

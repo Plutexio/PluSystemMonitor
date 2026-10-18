@@ -11,6 +11,8 @@ Item {
     property real maxValue: 100
     property color color: Theme.cpu
     property string label
+    /// Shown instead of the animated percentage, for values that aren't one.
+    property string valueText
     property string caption
     property real thickness: Math.max(8, size * 0.075)
 
@@ -81,16 +83,16 @@ Item {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: Math.round(root.shown) + "%"
+            text: root.valueText || Math.round(root.shown) + "%"
             color: Theme.text
-            font.pixelSize: root.size * 0.22
+            font.pixelSize: root.size * (root.valueText ? 0.15 : 0.22)
             font.weight: Font.Bold
             font.features: { "tnum": 1 }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
             // Small gauges keep just the number readable.
-            visible: root.size >= 100
+            visible: root.size >= 100 && root.label.length > 0
             text: root.label
             color: Theme.textDim
             font.pixelSize: Math.max(11, root.size * 0.065)

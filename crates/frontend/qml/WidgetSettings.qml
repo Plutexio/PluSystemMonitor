@@ -5,6 +5,7 @@ import PluSystemMonitor
 GlassPopup {
     id: root
 
+    required property Monitor monitor
     property int index: -1
     property var descriptor: null
     property var values: ({})
@@ -25,8 +26,18 @@ GlassPopup {
         valuesEdited(next)
     }
 
+    function sourceName(id) {
+        const source = Sources.catalog(monitor).find(s => s.id === id)
+        return source ? source.name : id + " (not available)"
+    }
+
     title: descriptor ? descriptor.name : ""
-    width: 320
+    width: 340
+
+    component Label: Text {
+        color: Theme.text
+        font.pixelSize: 14
+    }
 
     contentItem: Column {
         spacing: 18
@@ -49,13 +60,10 @@ GlassPopup {
                     width: parent.width
                     height: 26
 
-                    Text {
+                    Label {
                         anchors.verticalCenter: parent.verticalCenter
                         text: option.modelData.label
-                        color: Theme.text
-                        font.pixelSize: 14
                     }
-
                     Toggle {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
@@ -64,19 +72,28 @@ GlassPopup {
                     }
                 }
 
-                // accent: label above a row of colour dots.
-                Text {
-                    visible: option.modelData.type === "accent"
+                Label {
+                    visible: option.modelData.type !== "bool"
                     text: option.modelData.label
-                    color: Theme.text
-                    font.pixelSize: 14
                 }
+
+                // text: a free-form field; empty means the default.
+                GlassField {
+                    visible: option.modelData.type === "text"
+                    width: parent.width
+                    text: option.modelData.type === "text" ? (option.value ?? "") : ""
+                    placeholderText: option.modelData.placeholder ?? ""
+                    onTextEdited: root.set(option.modelData.key, text)
+                }
+
+                // accent: "auto" plus a row of colour dots.
                 Row {
                     visible: option.modelData.type === "accent"
                     spacing: 10
 
                     Repeater {
-                        model: Theme.accentKeys
+                        // Only widgets showing data sources can follow them.
+                        model: option.modelData.default === "auto" ? ["auto"].concat(Theme.accentKeys) : Theme.accentKeys
 
                         delegate: Rectangle {
                             id: dot
@@ -96,7 +113,18 @@ GlassPopup {
                                 width: dot.chosen ? 18 : 22
                                 height: width
                                 radius: width / 2
-                                color: Theme.accent(dot.modelData)
+                                color: dot.modelData === "auto" ? "transparent" : Theme.accent(dot.modelData)
+                                border.color: Theme.textDim
+                                border.width: dot.modelData === "auto" ? 2 : 0
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: dot.modelData === "auto"
+                                    text: "A"
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
 
                                 Behavior on width {
                                     NumberAnimation { duration: 140 }
@@ -110,6 +138,102 @@ GlassPopup {
                                 cursorShape: Qt.PointingHandCursor
                             }
                         }
+                    }
+                }
+
+                // sources: the chosen IDs in order, reorderable and removable.
+                Column {
+                    id: sourceList
+
+                    readonly property var list: option.modelData.type === "sources" ? (option.value ?? []) : []
+                    readonly property int min: option.modelData.min ?? 0
+                    readonly property int max: option.modelData.max ?? 8
+
+                    visible: option.modelData.type === "sources"
+                    width: parent.width
+                    spacing: 6
+
+                    Repeater {
+                        model: sourceList.list
+
+                        delegate: Rectangle {
+                            id: sourceRow
+
+                            required property int index
+                            required property string modelData
+
+                            width: sourceList.width
+                            height: 38
+                            radius: 10
+                            color: Theme.track
+
+                            Text {
+                                x: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - buttons.width - 24
+                                text: root.sourceName(sourceRow.modelData)
+                                color: Theme.text
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+
+                            Row {
+                                id: buttons
+
+                                anchors.right: parent.right
+                                anchors.rightMargin: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+
+                                GlassButton {
+                                    implicitHeight: 30
+                                    visible: sourceRow.index > 0
+                                    iconName: "chevronUp"
+                                    tip: "Move up"
+                                    onClicked: {
+                                        const next = sourceList.list.slice()
+                                        next.splice(sourceRow.index - 1, 0, next.splice(sourceRow.index, 1)[0])
+                                        root.set(option.modelData.key, next)
+                                    }
+                                }
+                                GlassButton {
+                                    implicitHeight: 30
+                                    visible: sourceList.list.length > sourceList.min
+                                    danger: true
+                                    iconName: "close"
+                                    tip: "Remove"
+                                    onClicked: root.set(option.modelData.key,
+                                        sourceList.list.filter((_, i) => i !== sourceRow.index))
+                                }
+                            }
+                        }
+                    }
+
+                    GlassButton {
+                        // A single-source widget swaps its source instead of adding one.
+                        readonly property bool swap: sourceList.max === 1 && sourceList.list.length === 1
+
+                        visible: swap || sourceList.list.length < sourceList.max
+                        iconName: swap ? "reset" : "plus"
+                        text: swap ? "Change source" : "Add source"
+                        onClicked: picker.open()
+
+                        SourcePicker {
+                            id: picker
+                            monitor: root.monitor
+                            taken: sourceList.list
+                            onPicked: id => root.set(option.modelData.key,
+                                parent.swap ? [id] : sourceList.list.concat([id]))
+                        }
+                    }
+
+                    Text {
+                        visible: (option.modelData.hint ?? "").length > 0
+                        width: parent.width
+                        text: option.modelData.hint ?? ""
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
                     }
                 }
             }

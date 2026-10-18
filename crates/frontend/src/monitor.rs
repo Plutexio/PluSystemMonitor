@@ -33,17 +33,11 @@ pub mod qobject {
         #[qproperty(QString, hostname)]
         #[qproperty(i32, interval_ms, cxx_name = "intervalMs")]
         #[qproperty(i32, uid)]
-        #[qproperty(f64, cpu_total, cxx_name = "cpuTotal")]
         #[qproperty(QList_f64, cpu_cores, cxx_name = "cpuCores")]
-        #[qproperty(QList_f64, cpu_history, cxx_name = "cpuHistory")]
-        #[qproperty(f64, mem_total, cxx_name = "memTotal")]
-        #[qproperty(f64, mem_used, cxx_name = "memUsed")]
-        #[qproperty(f64, swap_total, cxx_name = "swapTotal")]
-        #[qproperty(f64, swap_used, cxx_name = "swapUsed")]
-        #[qproperty(QList_f64, mem_history, cxx_name = "memHistory")]
-        /// JSON array, one object per GPU: the latest `GpuSample` fields in
-        /// camelCase plus `history` (usage %) and `memoryHistory` (VRAM %).
-        #[qproperty(QString, gpus)]
+        /// Bumped with every sample; bindings that read `metric()` depend on it.
+        #[qproperty(i32, revision)]
+        /// JSON array of every data source this machine offers (see `metrics`).
+        #[qproperty(QString, metric_catalog, cxx_name = "metricCatalog")]
         /// Set while something shows processes; the daemon only sends them then.
         #[qproperty(bool, processes_enabled, cxx_name = "processesEnabled")]
         #[qproperty(i32, process_count, cxx_name = "processCount")]
@@ -59,6 +53,11 @@ pub mod qobject {
         /// `signal` is one of terminate, kill, stop, continue.
         #[qinvokable]
         fn send_signal(self: Pin<&mut Self>, pid: i32, signal: &QString);
+
+        /// JSON for one data source (definition, value, max, history), or "" if
+        /// the connected machine doesn't have it.
+        #[qinvokable]
+        fn metric(&self, id: &QString) -> QString;
 
         /// JSON with everything known about the process, or "" if it is gone.
         #[qinvokable]
@@ -261,7 +260,6 @@ pub mod qobject {
 
 pub use crate::app_model::AppModelRust;
 
-use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -277,10 +275,8 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use crate::apps::{self, History};
 use crate::assets::AssetCache;
 use crate::client::{self, Command, Event};
+use crate::metrics::Metrics;
 use crate::processes::{self, Process, ProcessTable, Query};
-
-/// Points kept for the graphs.
-const HISTORY_POINTS: usize = 120;
 
 pub struct MonitorRust {
     connected: bool,
@@ -288,15 +284,9 @@ pub struct MonitorRust {
     hostname: QString,
     interval_ms: i32,
     uid: i32,
-    cpu_total: f64,
     cpu_cores: QList<f64>,
-    cpu_history: QList<f64>,
-    mem_total: f64,
-    mem_used: f64,
-    swap_total: f64,
-    swap_used: f64,
-    mem_history: QList<f64>,
-    gpus: QString,
+    revision: i32,
+    metric_catalog: QString,
     processes_enabled: bool,
     process_count: i32,
 
@@ -304,10 +294,7 @@ pub struct MonitorRust {
     generation: u64,
     stop: Option<Arc<Notify>>,
     commands: Option<UnboundedSender<Command>>,
-    cpu_points: VecDeque<f64>,
-    mem_points: VecDeque<f64>,
-    /// Per GPU: usage and VRAM-use history.
-    gpu_points: Vec<[VecDeque<f64>; 2]>,
+    metrics: Metrics,
     processes: ProcessTable,
     app_history: History,
     assets: AssetCache,
@@ -321,23 +308,15 @@ impl Default for MonitorRust {
             hostname: QString::default(),
             interval_ms: 1000,
             uid: -1,
-            cpu_total: 0.0,
             cpu_cores: QList::default(),
-            cpu_history: QList::default(),
-            mem_total: 0.0,
-            mem_used: 0.0,
-            swap_total: 0.0,
-            swap_used: 0.0,
-            mem_history: QList::default(),
-            gpus: QString::from("[]"),
+            revision: 0,
+            metric_catalog: QString::from("[]"),
             processes_enabled: false,
             process_count: 0,
             generation: 0,
             stop: None,
             commands: None,
-            cpu_points: VecDeque::with_capacity(HISTORY_POINTS),
-            mem_points: VecDeque::with_capacity(HISTORY_POINTS),
-            gpu_points: Vec::new(),
+            metrics: Metrics::default(),
             processes: ProcessTable::default(),
             app_history: History::default(),
             assets: AssetCache::default(),
@@ -553,14 +532,9 @@ impl qobject::Monitor {
                 uid,
                 history,
             } => {
-                {
-                    let mut rust = self.as_mut().rust_mut();
-                    rust.cpu_points.clear();
-                    rust.mem_points.clear();
-                    rust.gpu_points.clear();
-                }
+                self.as_mut().rust_mut().metrics.clear();
                 for sample in &history {
-                    self.as_mut().record(sample);
+                    self.as_mut().rust_mut().metrics.record(sample);
                 }
                 if let Some(last) = history.last() {
                     self.as_mut().show(last);
@@ -573,7 +547,7 @@ impl qobject::Monitor {
                 self.set_connected(true);
             }
             Event::Sample(sample) => {
-                self.as_mut().record(&sample);
+                self.as_mut().rust_mut().metrics.record(&sample);
                 self.as_mut().show(&sample);
                 self.sample_received();
             }
@@ -644,73 +618,24 @@ impl qobject::Monitor {
         }
     }
 
-    /// Appends a sample to the graph buffers.
-    fn record(self: Pin<&mut Self>, sample: &Sample) {
-        let mut pinned = self.rust_mut();
-        // A plain &mut lets us borrow both buffers at once.
-        let rust: &mut MonitorRust = &mut pinned;
-        let mem_percent = if sample.mem.total > 0 {
-            sample.mem.used as f64 / sample.mem.total as f64 * 100.0
-        } else {
-            0.0
-        };
-        let push = |points: &mut VecDeque<f64>, value: f64| {
-            if points.len() == HISTORY_POINTS {
-                points.pop_front();
-            }
-            points.push_back(value);
-        };
-        push(&mut rust.cpu_points, sample.cpu.total as f64);
-        push(&mut rust.mem_points, mem_percent);
-        rust.gpu_points
-            .resize_with(sample.gpus.len(), Default::default);
-        for (gpu, [usage, memory]) in sample.gpus.iter().zip(&mut rust.gpu_points) {
-            push(usage, gpu.usage as f64);
-            let used = gpu.memory_used as f64 / gpu.memory_total.max(1) as f64 * 100.0;
-            push(memory, used);
+    /// Publishes the latest sample to QML.
+    fn show(mut self: Pin<&mut Self>, sample: &Sample) {
+        let cores: Vec<f64> = sample.cpu.per_core.iter().map(|&c| c as f64).collect();
+        self.as_mut().set_cpu_cores(QList::from(cores));
+        let catalog = self.rust().metrics.catalog();
+        if self.metric_catalog().to_string() != catalog {
+            self.as_mut().set_metric_catalog(QString::from(&catalog));
         }
+        let revision = self.revision().wrapping_add(1);
+        self.set_revision(revision);
     }
 
-    /// Publishes the latest sample and graph buffers to QML.
-    fn show(mut self: Pin<&mut Self>, sample: &Sample) {
-        let cpu_history: QList<f64> = self.rust().cpu_points.iter().collect();
-        let mem_history: QList<f64> = self.rust().mem_points.iter().collect();
-        let cores: Vec<f64> = sample.cpu.per_core.iter().map(|&c| c as f64).collect();
-        let gpus: Vec<serde_json::Value> = sample
-            .gpus
-            .iter()
-            .zip(&self.rust().gpu_points)
-            .map(|(gpu, [usage, memory])| {
-                json!({
-                    "name": gpu.name,
-                    "vendor": gpu.vendor,
-                    "usage": gpu.usage,
-                    "memoryUsed": gpu.memory_used,
-                    "memoryTotal": gpu.memory_total,
-                    "temperature": gpu.temperature,
-                    "power": gpu.power,
-                    "powerLimit": gpu.power_limit,
-                    "coreClock": gpu.core_clock,
-                    "memoryClock": gpu.memory_clock,
-                    "fan": gpu.fan,
-                    "encoder": gpu.encoder,
-                    "decoder": gpu.decoder,
-                    "history": usage,
-                    "memoryHistory": memory,
-                })
-            })
-            .collect();
-
-        self.as_mut().set_cpu_total(sample.cpu.total as f64);
-        self.as_mut().set_cpu_cores(QList::from(cores));
-        self.as_mut().set_cpu_history(cpu_history);
-        self.as_mut().set_mem_total(sample.mem.total as f64);
-        self.as_mut().set_mem_used(sample.mem.used as f64);
-        self.as_mut().set_swap_total(sample.mem.swap_total as f64);
-        self.as_mut().set_swap_used(sample.mem.swap_used as f64);
-        self.as_mut()
-            .set_gpus(QString::from(&serde_json::Value::from(gpus).to_string()));
-        self.set_mem_history(mem_history);
+    pub fn metric(&self, id: &QString) -> QString {
+        self.rust()
+            .metrics
+            .get(&id.to_string())
+            .map(|json| QString::from(&json))
+            .unwrap_or_default()
     }
 }
 
