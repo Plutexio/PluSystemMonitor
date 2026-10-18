@@ -116,6 +116,34 @@ sources with `Sources.read`), an entry in `qml/Widgets.qml`, and a line in
 `cargo test -p plusysmond live_gpus -- --ignored --nocapture` prints what the
 daemon sees on the current machine.
 
+## Sensors
+
+Every hwmon sensor the kernel exposes becomes a data source
+(`sensor.<device>.<feature>`, e.g. `sensor.coretemp.0.temp1`,
+`sensor.it87.2624.fan1`, `sensor.nvme0.temp1`): temperatures, voltages,
+fans, power and current, grouped by what they belong to (CPU, motherboard,
+NVMe drives, network adapter, ...). IDs use the device, not the `hwmonN`
+number, so they survive reboots. Fan headers and voltage inputs that never
+read anything are left out. The Processor also gets `cpu.temperature`
+(package), `cpu.frequency` (average clock), `cpu.frequency_peak` (fastest
+core) and, when readable, `cpu.power`.
+
+Things to know:
+
+- **Motherboard voltages are raw.** Super I/O chips (it87, nct67xx, ...)
+  measure most rails through resistor dividers the kernel doesn't know about,
+  so e.g. the 12 V rail may read about 2 V and most inputs are unnamed. Rename
+  a widget to what the input is on your board.
+- **CPU power** comes from the RAPL energy counter, which only root can read
+  (it leaks information through a power side channel, see PLATYPUS). Running
+  the daemon as root shows it; so does making the file world-readable, e.g.
+  with a tmpfiles rule `z /sys/class/powercap/intel-rapl:0/energy_uj 0444 - - -`,
+  if you accept that trade-off on your machine.
+- Fans controlled by software (fan curves, zero-RPM modes) legitimately read 0.
+
+`cargo test -p plusysmond live_sensors -- --ignored --nocapture` lists what the
+daemon finds.
+
 ## Processes
 
 The Processes page lists everything running on the connected machine: search by

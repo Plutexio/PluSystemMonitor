@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use plusysmon_protocol::{AppKind, Sample};
+use plusysmon_protocol::{AppKind, Sample, SensorKind};
 use serde::Serialize;
 use serde_json::json;
 
@@ -25,6 +25,9 @@ pub enum Unit {
     Celsius,
     Watts,
     Megahertz,
+    Volts,
+    Rpm,
+    Amps,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -331,6 +334,53 @@ fn read(sample: &Sample) -> Vec<Reading> {
         sample.cpu.total as f64,
         100.0,
     );
+    let extras = [
+        (
+            "cpu.temperature",
+            "CPU temperature",
+            Unit::Celsius,
+            "disk",
+            sample.cpu.temperature,
+            100.0,
+        ),
+        (
+            "cpu.frequency",
+            "CPU clock (average)",
+            Unit::Megahertz,
+            "cpu",
+            sample.cpu.frequency,
+            sample.cpu.frequency_max.unwrap_or(0.0),
+        ),
+        (
+            "cpu.frequency_peak",
+            "CPU clock (fastest core)",
+            Unit::Megahertz,
+            "cpu",
+            sample.cpu.frequency_peak,
+            sample.cpu.frequency_max.unwrap_or(0.0),
+        ),
+        (
+            "cpu.power",
+            "CPU power",
+            Unit::Watts,
+            "gpu",
+            sample.cpu.power,
+            0.0,
+        ),
+    ];
+    for (id, name, unit, accent, value, max) in extras {
+        if let Some(value) = value {
+            add(
+                id.into(),
+                name.into(),
+                cpu,
+                unit,
+                accent,
+                value as f64,
+                max as f64,
+            );
+        }
+    }
     for (i, core) in sample.cpu.per_core.iter().enumerate() {
         let category = "Processor cores";
         add(
@@ -441,6 +491,26 @@ fn read(sample: &Sample) -> Vec<Reading> {
             }
         }
     }
+
+    for sensor in &sample.sensors {
+        // Each kind gets a colour of its own, so mixed graphs stay readable.
+        let (unit, accent, max) = match sensor.kind {
+            SensorKind::Temperature => (Unit::Celsius, "disk", sensor.limit.unwrap_or(100.0)),
+            SensorKind::Voltage => (Unit::Volts, "network", 0.0),
+            SensorKind::Fan => (Unit::Rpm, "memory", 0.0),
+            SensorKind::Power => (Unit::Watts, "gpu", 0.0),
+            SensorKind::Current => (Unit::Amps, "swap", 0.0),
+        };
+        add(
+            format!("sensor.{}", sensor.id),
+            format!("{} {}", sensor.device, sensor.label),
+            &format!("Sensors · {} ({})", sensor.device, sensor.driver),
+            unit,
+            accent,
+            sensor.value,
+            max,
+        );
+    }
     readings
 }
 
@@ -465,6 +535,11 @@ mod tests {
             cpu: CpuSample {
                 total: cpu,
                 per_core: vec![cpu, cpu],
+                temperature: None,
+                frequency: None,
+                frequency_peak: None,
+                frequency_max: None,
+                power: None,
             },
             mem: MemSample {
                 total: 1000,
@@ -488,6 +563,7 @@ mod tests {
                 encoder: None,
                 decoder: None,
             }],
+            sensors: vec![],
         }
     }
 
@@ -642,5 +718,49 @@ mod tests {
         assert_eq!(game["available"], false);
         assert_eq!(game["name"], "Game GPU");
         assert!(metrics.history("app.steam:2.cpu").is_empty());
+    }
+
+    #[test]
+    fn offers_cpu_extras_and_sensors() {
+        let mut with_sensors = sample(10.0, 2000);
+        with_sensors.cpu.temperature = Some(53.0);
+        with_sensors.cpu.frequency = Some(4000.0);
+        with_sensors.cpu.frequency_max = Some(4900.0);
+        with_sensors.sensors = vec![
+            plusysmon_protocol::SensorReading {
+                id: "it87.2624.fan1".into(),
+                device: "Motherboard".into(),
+                driver: "it8689".into(),
+                label: "Fan 1".into(),
+                kind: SensorKind::Fan,
+                value: 450.0,
+                limit: None,
+            },
+            plusysmon_protocol::SensorReading {
+                id: "nvme0.temp1".into(),
+                device: "NVMe Lexar".into(),
+                driver: "nvme".into(),
+                label: "Composite".into(),
+                kind: SensorKind::Temperature,
+                value: 48.0,
+                limit: Some(95.0),
+            },
+        ];
+        let mut metrics = Metrics::default();
+        metrics.record(&with_sensors);
+
+        let temp = get(&metrics, "cpu.temperature");
+        assert_eq!(temp["value"], 53.0);
+        assert_eq!(temp["unit"], "celsius");
+        assert_eq!(get(&metrics, "cpu.frequency")["max"], 4900.0);
+        assert!(metrics.get("cpu.power").is_none());
+
+        let fan = get(&metrics, "sensor.it87.2624.fan1");
+        assert_eq!(fan["name"], "Motherboard Fan 1");
+        assert_eq!(fan["category"], "Sensors · Motherboard (it8689)");
+        assert_eq!(fan["unit"], "rpm");
+        // No natural scale: the highest value seen.
+        assert_eq!(fan["max"], 450.0);
+        assert_eq!(get(&metrics, "sensor.nvme0.temp1")["max"], 95.0);
     }
 }

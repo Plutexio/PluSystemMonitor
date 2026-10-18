@@ -5,6 +5,7 @@ mod gpu;
 mod icons;
 mod mem;
 mod process;
+mod sensors;
 mod steam;
 mod users;
 
@@ -18,6 +19,7 @@ use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats, Sample};
 pub struct Collector {
     cpu: cpu::CpuCollector,
     gpu: gpu::GpuCollector,
+    sensors: sensors::Sensors,
     processes: process::ProcessCollector,
 }
 
@@ -26,6 +28,7 @@ impl Collector {
         Ok(Self {
             cpu: cpu::CpuCollector::new()?,
             gpu: gpu::GpuCollector::new(),
+            sensors: sensors::Sensors::new(),
             processes: process::ProcessCollector::new(assets),
         })
     }
@@ -35,11 +38,19 @@ impl Collector {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        let mut cpu = self.cpu.sample()?;
+        let (sensors, extra) = self.sensors.sample();
+        cpu.temperature = extra.temperature;
+        cpu.frequency = extra.frequency;
+        cpu.frequency_peak = extra.frequency_peak;
+        cpu.frequency_max = extra.frequency_max;
+        cpu.power = extra.power;
         Ok(Sample {
             timestamp_ms,
-            cpu: self.cpu.sample()?,
+            cpu,
             mem: mem::sample()?,
             gpus: self.gpu.sample(),
+            sensors,
         })
     }
 

@@ -10,7 +10,7 @@ x = 0
 y = 0
 w = 3
 h = 4
-options = { sources = ["cpu.total"] }
+options = { sources = ["cpu.total", "cpu.temperature", "cpu.frequency"] }
 
 [[widgets]]
 type = "graph"

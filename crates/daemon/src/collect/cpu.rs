@@ -36,6 +36,12 @@ impl CpuCollector {
                 .enumerate()
                 .map(|(i, &now)| usage(self.prev_cores.get(i).copied().unwrap_or_default(), now))
                 .collect(),
+            // Filled in from the sensors.
+            temperature: None,
+            frequency: None,
+            frequency_peak: None,
+            frequency_max: None,
+            power: None,
         };
         self.elapsed_ticks = total.total.saturating_sub(self.prev_total.total);
         self.prev_total = total;

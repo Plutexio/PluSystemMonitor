@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change to the message types.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -84,6 +84,9 @@ pub struct Sample {
     pub cpu: CpuSample,
     pub mem: MemSample,
     pub gpus: Vec<GpuSample>,
+    /// Every hardware sensor the kernel exposes (hwmon), except GPU ones,
+    /// which `gpus` covers.
+    pub sensors: Vec<SensorReading>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +94,44 @@ pub struct CpuSample {
     /// Overall utilisation, 0.0..=100.0.
     pub total: f32,
     pub per_core: Vec<f32>,
+    /// Package temperature, °C.
+    pub temperature: Option<f32>,
+    /// Average and highest current core clock, and the hardware maximum, MHz.
+    pub frequency: Option<f32>,
+    pub frequency_peak: Option<f32>,
+    pub frequency_max: Option<f32>,
+    /// Package power, watts (needs read access to the RAPL energy counter).
+    pub power: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SensorKind {
+    /// °C
+    Temperature,
+    /// Volts.
+    Voltage,
+    /// RPM.
+    Fan,
+    /// Watts.
+    Power,
+    /// Amperes.
+    Current,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorReading {
+    /// Stable across reboots: `<device>.<feature>`, e.g. `it87.2624.fan1`.
+    pub id: String,
+    /// What the chip is part of: "CPU", "Motherboard", "NVMe Lexar SSD ...".
+    pub device: String,
+    /// The kernel driver, e.g. "coretemp", "it8689".
+    pub driver: String,
+    /// The driver's label, or a generic one like "Voltage 3".
+    pub label: String,
+    pub kind: SensorKind,
+    pub value: f64,
+    /// The driver's critical (or maximum) limit, when it has one.
+    pub limit: Option<f64>,
 }
 
 /// One graphics card. Optional fields are what not every driver reports.
@@ -235,6 +276,11 @@ mod tests {
             cpu: CpuSample {
                 total: 12.5,
                 per_core: vec![10.0, 15.0],
+                temperature: None,
+                frequency: None,
+                frequency_peak: None,
+                frequency_max: None,
+                power: None,
             },
             mem: MemSample {
                 total: 16,
@@ -244,6 +290,7 @@ mod tests {
                 swap_used: 1,
             },
             gpus: vec![],
+            sensors: vec![],
         });
         let ServerMsg::Sample(s) = decode::<ServerMsg>(&encode(&msg)).unwrap() else {
             panic!("wrong variant");

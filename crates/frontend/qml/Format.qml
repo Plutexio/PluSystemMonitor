@@ -28,6 +28,9 @@ QtObject {
         case "celsius": return temperature(value)
         case "watts": return watts(value)
         case "megahertz": return Math.round(value) + " MHz"
+        case "volts": return value.toFixed(3) + " V"
+        case "rpm": return Math.round(value) + " RPM"
+        case "amps": return value.toFixed(2) + " A"
         }
         return value.toFixed(1)
     }
