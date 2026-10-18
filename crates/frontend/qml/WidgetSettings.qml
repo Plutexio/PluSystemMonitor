@@ -56,39 +56,11 @@ GlassPopup {
                         font.pixelSize: 14
                     }
 
-                    Rectangle {
-                        id: toggle
-
+                    Toggle {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 44
-                        height: 24
-                        radius: 12
-                        color: option.value ? Theme.primary : Theme.track
-
-                        Behavior on color {
-                            ColorAnimation { duration: 160 }
-                        }
-
-                        Rectangle {
-                            width: 18
-                            height: 18
-                            radius: 9
-                            y: 3
-                            x: option.value ? parent.width - width - 3 : 3
-                            color: "white"
-
-                            Behavior on x {
-                                NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
-                            }
-                        }
-
-                        TapHandler {
-                            onTapped: root.set(option.modelData.key, !option.value)
-                        }
-                        HoverHandler {
-                            cursorShape: Qt.PointingHandCursor
-                        }
+                        checked: option.value === true
+                        onToggled: root.set(option.modelData.key, !option.value)
                     }
                 }
 

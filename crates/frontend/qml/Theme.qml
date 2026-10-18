@@ -66,14 +66,4 @@ QtObject {
     function accent(key) {
         return accentKeys.includes(key) ? theme[key] : cpu
     }
-
-    function formatBytes(bytes) {
-        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
-        let i = 0
-        while (bytes >= 1024 && i < units.length - 1) {
-            bytes /= 1024
-            i++
-        }
-        return bytes.toFixed(i >= 3 ? 1 : 0) + " " + units[i]
-    }
 }

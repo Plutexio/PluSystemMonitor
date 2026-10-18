@@ -1,0 +1,52 @@
+pragma Singleton
+import QtQuick
+
+// Turning numbers into text the same way everywhere.
+QtObject {
+    function bytes(value) {
+        const units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        let i = 0
+        while (value >= 1024 && i < units.length - 1) {
+            value /= 1024
+            i++
+        }
+        return value.toFixed(i >= 3 ? 1 : 0) + " " + units[i]
+    }
+
+    // Disk rates: negative means "not readable", zero is left blank to cut noise.
+    function rate(value) {
+        if (value < 0)
+            return "—"
+        return value === 0 ? "" : bytes(value) + "/s"
+    }
+
+    function processState(letter) {
+        switch (letter) {
+        case "R": return "Running"
+        case "S": return "Sleeping"
+        case "D": return "Waiting on I/O"
+        case "T": return "Paused"
+        case "t": return "Traced"
+        case "Z": return "Zombie"
+        case "I": return "Idle"
+        case "X": return "Dead"
+        default: return letter
+        }
+    }
+
+    // "3 h 12 min", "45 s", "2 d 4 h": the two largest units are enough.
+    function duration(ms) {
+        let s = Math.max(0, Math.floor(ms / 1000))
+        const parts = [[86400, "d"], [3600, "h"], [60, "min"], [1, "s"]]
+        const out = []
+        for (const [size, unit] of parts) {
+            if (s >= size || (unit === "s" && out.length === 0)) {
+                out.push(Math.floor(s / size) + " " + unit)
+                s %= size
+            }
+            if (out.length === 2)
+                break
+        }
+        return out.join(" ")
+    }
+}

@@ -13,6 +13,8 @@ struct Times {
 pub struct CpuCollector {
     prev_total: Times,
     prev_cores: Vec<Times>,
+    /// Machine-wide CPU time between the last two samples, in clock ticks.
+    elapsed_ticks: u64,
 }
 
 impl CpuCollector {
@@ -21,6 +23,7 @@ impl CpuCollector {
         Ok(Self {
             prev_total,
             prev_cores,
+            elapsed_ticks: 0,
         })
     }
 
@@ -34,9 +37,14 @@ impl CpuCollector {
                 .map(|(i, &now)| usage(self.prev_cores.get(i).copied().unwrap_or_default(), now))
                 .collect(),
         };
+        self.elapsed_ticks = total.total.saturating_sub(self.prev_total.total);
         self.prev_total = total;
         self.prev_cores = cores;
         Ok(sample)
+    }
+
+    pub fn elapsed_ticks(&self) -> u64 {
+        self.elapsed_ticks
     }
 }
 

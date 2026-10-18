@@ -10,7 +10,7 @@ Card {
     readonly property color tint: Theme.accent(options.accent)
 
     title: "Memory history"
-    subtitle: monitor.connected ? Theme.formatBytes(monitor.memUsed) : ""
+    subtitle: monitor.connected ? Format.bytes(monitor.memUsed) : ""
     accent: tint
 
     LiveGraph {

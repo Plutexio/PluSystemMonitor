@@ -1,9 +1,11 @@
 mod collect;
 mod server;
+mod table;
 mod token;
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -72,8 +74,13 @@ fn main() -> Result<()> {
         hostname,
         interval_ms: args.interval_ms,
         token,
+        // SAFETY: getuid cannot fail.
+        uid: unsafe { libc::getuid() },
         history: Mutex::new(VecDeque::with_capacity(capacity)),
         samples: broadcast::channel(16).0,
+        processes: Mutex::default(),
+        process_updates: broadcast::channel(16).0,
+        process_subscribers: AtomicUsize::new(0),
     });
 
     tokio::runtime::Builder::new_current_thread()
@@ -128,6 +135,20 @@ async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: 
         history.push_back(sample.clone());
         // Err only means nobody is connected right now.
         let _ = shared.samples.send(sample);
+        drop(history);
+
+        // Walking /proc costs a few milliseconds, so only do it while someone looks.
+        if shared.process_subscribers.load(Ordering::Relaxed) > 0 {
+            let current = collector.sample_processes();
+            let mut processes = shared.processes.lock().unwrap();
+            let update = processes.update(current);
+            if !table::is_empty(&update) {
+                let _ = shared.process_updates.send(Arc::new(update));
+            }
+        } else if collector.processes_active() {
+            collector.reset_processes();
+            shared.processes.lock().unwrap().clear();
+        }
     }
 }
 

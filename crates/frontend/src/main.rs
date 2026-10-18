@@ -4,6 +4,7 @@ mod layout;
 mod monitor;
 mod paths;
 mod prefs;
+mod processes;
 mod theme;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};

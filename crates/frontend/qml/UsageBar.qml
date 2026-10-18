@@ -26,7 +26,7 @@ Column {
         Text {
             id: valueText
             anchors.right: parent.right
-            text: root.total > 0 ? Theme.formatBytes(root.used) + " / " + Theme.formatBytes(root.total) : "—"
+            text: root.total > 0 ? Format.bytes(root.used) + " / " + Format.bytes(root.total) : "—"
             color: Theme.text
             font.pixelSize: 13
             font.weight: Font.DemiBold

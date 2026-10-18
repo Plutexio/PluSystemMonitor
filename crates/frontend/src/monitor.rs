@@ -1,4 +1,5 @@
-//! The `Monitor` QML element: owns the daemon connection and exposes its data as properties.
+//! The `Monitor` QML element owns the daemon connection and exposes its data as
+//! properties; `ProcessModel` presents its process table as a list model.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -7,6 +8,20 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qlist.h");
         type QList_f64 = cxx_qt_lib::QList<f64>;
+        include!("cxx-qt-lib/qhash.h");
+        type QHash_i32_QByteArray = cxx_qt_lib::QHash<cxx_qt_lib::QHashPair_i32_QByteArray>;
+        include!("cxx-qt-lib/qvariant.h");
+        type QVariant = cxx_qt_lib::QVariant;
+        include!("cxx-qt-lib/qmodelindex.h");
+        type QModelIndex = cxx_qt_lib::QModelIndex;
+        include!("cxx-qt-lib/qvector.h");
+        type QVector_i32 = cxx_qt_lib::QVector<i32>;
+    }
+
+    unsafe extern "C++Qt" {
+        include!(<QtCore/QAbstractListModel>);
+        #[qobject]
+        type QAbstractListModel;
     }
 
     #[auto_cxx_name]
@@ -17,6 +32,7 @@ pub mod qobject {
         #[qproperty(QString, status)]
         #[qproperty(QString, hostname)]
         #[qproperty(i32, interval_ms, cxx_name = "intervalMs")]
+        #[qproperty(i32, uid)]
         #[qproperty(f64, cpu_total, cxx_name = "cpuTotal")]
         #[qproperty(QList_f64, cpu_cores, cxx_name = "cpuCores")]
         #[qproperty(QList_f64, cpu_history, cxx_name = "cpuHistory")]
@@ -25,6 +41,9 @@ pub mod qobject {
         #[qproperty(f64, swap_total, cxx_name = "swapTotal")]
         #[qproperty(f64, swap_used, cxx_name = "swapUsed")]
         #[qproperty(QList_f64, mem_history, cxx_name = "memHistory")]
+        /// Set while something shows processes; the daemon only sends them then.
+        #[qproperty(bool, processes_enabled, cxx_name = "processesEnabled")]
+        #[qproperty(i32, process_count, cxx_name = "processCount")]
         type Monitor = super::MonitorRust;
 
         /// An empty token for a local daemon is read from the daemon's token file.
@@ -34,12 +53,115 @@ pub mod qobject {
         #[qinvokable]
         fn disconnect_from(self: Pin<&mut Self>);
 
+        /// `signal` is one of terminate, kill, stop, continue.
+        #[qinvokable]
+        fn send_signal(self: Pin<&mut Self>, pid: i32, signal: &QString);
+
+        /// JSON with everything known about the process, or "" if it is gone.
+        #[qinvokable]
+        fn process_details(&self, pid: i32) -> QString;
+
         /// Emitted after the properties were updated with a fresh sample.
         #[qsignal]
         fn sample_received(self: Pin<&mut Self>);
+
+        #[qsignal]
+        fn processes_updated(self: Pin<&mut Self>);
+
+        #[qsignal]
+        fn action_failed(self: Pin<&mut Self>, message: &QString);
     }
 
     impl cxx_qt::Threading for Monitor {}
+    impl cxx_qt::Initialize for Monitor {}
+
+    extern "RustQt" {
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        /// Must outlive the model; in QML both live in the same window.
+        #[qproperty(*mut Monitor, monitor)]
+        #[qproperty(QString, sort_key, cxx_name = "sortKey")]
+        #[qproperty(bool, descending)]
+        #[qproperty(QString, filter)]
+        #[qproperty(bool, only_mine, cxx_name = "onlyMine")]
+        #[qproperty(bool, show_kernel_threads, cxx_name = "showKernelThreads")]
+        #[qproperty(i32, count)]
+        /// Largest values among the shown rows, for scaling in-cell bars.
+        #[qproperty(f64, max_cpu, cxx_name = "maxCpu")]
+        #[qproperty(f64, max_memory, cxx_name = "maxMemory")]
+        type ProcessModel = super::ProcessModelRust;
+
+        /// Rebuilds the rows from the monitor's table; call on `processesUpdated`.
+        #[qinvokable]
+        fn refresh(self: Pin<&mut ProcessModel>);
+
+        #[qinvokable]
+        #[cxx_name = "pidAt"]
+        fn pid_at(self: &ProcessModel, row: i32) -> i32;
+
+        /// -1 when the process isn't shown.
+        #[qinvokable]
+        #[cxx_name = "rowOf"]
+        fn row_of(self: &ProcessModel, pid: i32) -> i32;
+
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &ProcessModel, index: &QModelIndex, role: i32) -> QVariant;
+
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &ProcessModel) -> QHash_i32_QByteArray;
+
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &ProcessModel, parent: &QModelIndex) -> i32;
+    }
+
+    impl cxx_qt::Initialize for ProcessModel {}
+
+    unsafe extern "RustQt" {
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut ProcessModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut ProcessModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut ProcessModel>);
+
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut ProcessModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut ProcessModel>);
+
+        #[inherit]
+        fn index(self: &ProcessModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+    }
 }
 
 use std::collections::VecDeque;
@@ -47,11 +169,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::{QList, QString};
-use plusysmon_protocol::Sample;
+use cxx_qt_lib::{
+    QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant, QVector,
+};
+use plusysmon_protocol::{Sample, Signal};
+use serde_json::json;
 use tokio::sync::Notify;
+use tokio::sync::mpsc::{self, UnboundedSender};
 
-use crate::client::{self, Event};
+use crate::client::{self, Command, Event};
+use crate::processes::{self, Process, ProcessTable, Query};
 
 /// Points kept for the graphs.
 const HISTORY_POINTS: usize = 120;
@@ -61,6 +188,7 @@ pub struct MonitorRust {
     status: QString,
     hostname: QString,
     interval_ms: i32,
+    uid: i32,
     cpu_total: f64,
     cpu_cores: QList<f64>,
     cpu_history: QList<f64>,
@@ -69,12 +197,16 @@ pub struct MonitorRust {
     swap_total: f64,
     swap_used: f64,
     mem_history: QList<f64>,
+    processes_enabled: bool,
+    process_count: i32,
 
     /// Bumped per connection so events queued by a previous one are ignored.
     generation: u64,
     stop: Option<Arc<Notify>>,
+    commands: Option<UnboundedSender<Command>>,
     cpu_points: VecDeque<f64>,
     mem_points: VecDeque<f64>,
+    processes: ProcessTable,
 }
 
 impl Default for MonitorRust {
@@ -84,6 +216,7 @@ impl Default for MonitorRust {
             status: QString::from("Not connected"),
             hostname: QString::default(),
             interval_ms: 1000,
+            uid: -1,
             cpu_total: 0.0,
             cpu_cores: QList::default(),
             cpu_history: QList::default(),
@@ -92,10 +225,14 @@ impl Default for MonitorRust {
             swap_total: 0.0,
             swap_used: 0.0,
             mem_history: QList::default(),
+            processes_enabled: false,
+            process_count: 0,
             generation: 0,
             stop: None,
+            commands: None,
             cpu_points: VecDeque::with_capacity(HISTORY_POINTS),
             mem_points: VecDeque::with_capacity(HISTORY_POINTS),
+            processes: ProcessTable::default(),
         }
     }
 }
@@ -105,6 +242,16 @@ impl Drop for MonitorRust {
         if let Some(stop) = self.stop.take() {
             stop.notify_one();
         }
+    }
+}
+
+impl cxx_qt::Initialize for qobject::Monitor {
+    fn initialize(self: Pin<&mut Self>) {
+        self.on_processes_enabled_changed(|monitor| {
+            let processes = *monitor.processes_enabled();
+            monitor.command(Command::Subscribe { processes });
+        })
+        .release();
     }
 }
 
@@ -122,13 +269,18 @@ impl qobject::Monitor {
         }
 
         let stop = Arc::new(Notify::new());
+        let (commands, command_rx) = mpsc::unbounded_channel();
+        if *self.processes_enabled() {
+            let _ = commands.send(Command::Subscribe { processes: true });
+        }
         let generation = {
             let mut rust = self.as_mut().rust_mut();
             rust.stop = Some(stop.clone());
+            rust.commands = Some(commands);
             rust.generation
         };
         let qt_thread = self.qt_thread();
-        client::spawn(address, token, stop, move |event| {
+        client::spawn(address, token, stop, command_rx, move |event| {
             qt_thread
                 .queue(move |mut monitor| {
                     if monitor.rust().generation == generation {
@@ -145,10 +297,60 @@ impl qobject::Monitor {
             if let Some(stop) = rust.stop.take() {
                 stop.notify_one();
             }
+            rust.commands = None;
             rust.generation += 1;
         }
+        self.as_mut().clear_processes();
         self.as_mut().set_connected(false);
         self.set_status(QString::from("Not connected"));
+    }
+
+    pub fn send_signal(self: Pin<&mut Self>, pid: i32, signal: &QString) {
+        let signal = match signal.to_string().as_str() {
+            "terminate" => Signal::Terminate,
+            "kill" => Signal::Kill,
+            "stop" => Signal::Stop,
+            "continue" => Signal::Continue,
+            other => {
+                let message = format!("Unknown signal {other:?}");
+                self.action_failed(&QString::from(&message));
+                return;
+            }
+        };
+        let Ok(pid) = u32::try_from(pid) else { return };
+        if !*self.connected() {
+            self.action_failed(&QString::from("Not connected to a daemon"));
+            return;
+        }
+        self.command(Command::Signal { pid, signal });
+    }
+
+    pub fn process_details(&self, pid: i32) -> QString {
+        let table = &self.rust().processes;
+        let Some(Process { info, stats }) = u32::try_from(pid).ok().and_then(|pid| table.get(pid))
+        else {
+            return QString::default();
+        };
+        let parent = table.get(info.ppid).map(|p| p.info.name.as_str());
+        let details = json!({
+            "info": info,
+            "stats": stats,
+            "parentName": parent,
+        });
+        QString::from(&details.to_string())
+    }
+
+    fn command(&self, command: Command) {
+        if let Some(commands) = &self.rust().commands {
+            // Err only means the connection thread is gone; the UI shows that already.
+            let _ = commands.send(command);
+        }
+    }
+
+    fn clear_processes(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().processes.clear();
+        self.as_mut().set_process_count(0);
+        self.processes_updated();
     }
 
     fn apply(mut self: Pin<&mut Self>, event: Event) {
@@ -160,6 +362,7 @@ impl qobject::Monitor {
             Event::Connected {
                 hostname,
                 interval_ms,
+                uid,
                 history,
             } => {
                 {
@@ -175,6 +378,7 @@ impl qobject::Monitor {
                 }
                 self.as_mut().set_hostname(QString::from(&hostname));
                 self.as_mut().set_interval_ms(interval_ms as i32);
+                self.as_mut().set_uid(uid as i32);
                 self.as_mut().set_status(QString::from("Connected"));
                 self.set_connected(true);
             }
@@ -183,13 +387,44 @@ impl qobject::Monitor {
                 self.as_mut().show(&sample);
                 self.sample_received();
             }
+            Event::Processes(update) => {
+                let count = {
+                    let mut rust = self.as_mut().rust_mut();
+                    rust.processes.apply(update);
+                    rust.processes.len() as i32
+                };
+                self.as_mut().set_process_count(count);
+                self.processes_updated();
+            }
+            Event::SignalResult {
+                pid,
+                signal,
+                error: Some(error),
+            } => {
+                let verb = match signal {
+                    Signal::Terminate => "end",
+                    Signal::Kill => "kill",
+                    Signal::Stop => "pause",
+                    Signal::Continue => "resume",
+                };
+                let name = self.rust().processes.get(pid).map_or_else(
+                    || format!("process {pid}"),
+                    |p| format!("{} ({pid})", p.info.name),
+                );
+                let message = format!("Could not {verb} {name}: {error}");
+                self.action_failed(&QString::from(&message));
+            }
+            // Success shows up in the next process update.
+            Event::SignalResult { error: None, .. } => {}
             Event::Lost(reason) => {
+                self.as_mut().clear_processes();
                 self.as_mut().set_connected(false);
                 self.set_status(QString::from(&format!(
                     "Connection lost ({reason}), retrying…"
                 )));
             }
             Event::Rejected(reason) => {
+                self.as_mut().clear_processes();
                 self.as_mut().set_connected(false);
                 self.set_status(QString::from(&format!("Rejected by daemon: {reason}")));
             }
@@ -231,5 +466,191 @@ impl qobject::Monitor {
         self.as_mut().set_swap_total(sample.mem.swap_total as f64);
         self.as_mut().set_swap_used(sample.mem.swap_used as f64);
         self.set_mem_history(mem_history);
+    }
+}
+
+// Roles exposed to QML delegates, starting at Qt::UserRole.
+const ROLES: &[&str] = &[
+    "pid",
+    "name",
+    "command",
+    "user",
+    "cpu",
+    "memory",
+    "readRate",
+    "writeRate",
+    "threads",
+    "state",
+    "nice",
+    "mine",
+];
+const USER_ROLE: i32 = 0x0100;
+
+/// Rows are positional slots: a refresh rewrites their contents in place and
+/// only adds or removes slots at the end. Views keep their scroll position and
+/// delegates, even though sorting by a live value reorders processes constantly.
+pub struct ProcessModelRust {
+    monitor: *mut qobject::Monitor,
+    sort_key: QString,
+    descending: bool,
+    filter: QString,
+    only_mine: bool,
+    show_kernel_threads: bool,
+    count: i32,
+    max_cpu: f64,
+    max_memory: f64,
+    rows: Vec<Process>,
+}
+
+impl Default for ProcessModelRust {
+    fn default() -> Self {
+        Self {
+            monitor: std::ptr::null_mut(),
+            sort_key: QString::from("cpu"),
+            descending: true,
+            filter: QString::default(),
+            only_mine: false,
+            show_kernel_threads: false,
+            count: 0,
+            max_cpu: 0.0,
+            max_memory: 0.0,
+            rows: Vec::new(),
+        }
+    }
+}
+
+impl cxx_qt::Initialize for qobject::ProcessModel {
+    fn initialize(mut self: Pin<&mut Self>) {
+        self.as_mut()
+            .on_monitor_changed(|model| model.refresh())
+            .release();
+        self.as_mut()
+            .on_sort_key_changed(|model| model.refresh())
+            .release();
+        self.as_mut()
+            .on_descending_changed(|model| model.refresh())
+            .release();
+        self.as_mut()
+            .on_filter_changed(|model| model.refresh())
+            .release();
+        self.as_mut()
+            .on_only_mine_changed(|model| model.refresh())
+            .release();
+        self.on_show_kernel_threads_changed(|model| model.refresh())
+            .release();
+    }
+}
+
+impl qobject::ProcessModel {
+    pub fn refresh(mut self: Pin<&mut Self>) {
+        let rows = {
+            // SAFETY: QML keeps the monitor alive for as long as this model exists.
+            let monitor = unsafe { self.monitor().as_ref() };
+            match monitor {
+                Some(monitor) => {
+                    let sort = self.sort_key().to_string();
+                    let filter = self.filter().to_string();
+                    let uid = u32::try_from(*monitor.uid()).ok();
+                    let query = Query {
+                        sort: &sort,
+                        descending: *self.descending(),
+                        filter: &filter,
+                        uid: uid.filter(|_| *self.only_mine()),
+                        kernel_threads: *self.show_kernel_threads(),
+                    };
+                    processes::select(&monitor.rust().processes, &query)
+                }
+                None => Vec::new(),
+            }
+        };
+
+        let max_cpu = rows.iter().map(|p| p.stats.cpu as f64).fold(0.0, f64::max);
+        let max_memory = rows
+            .iter()
+            .map(|p| p.stats.memory as f64)
+            .fold(0.0, f64::max);
+        let old = self.rows.len() as i32;
+        let new = rows.len() as i32;
+        let root = QModelIndex::default();
+        // SAFETY: each begin is paired with its end, with the row change in between.
+        unsafe {
+            if new > old {
+                self.as_mut().begin_insert_rows(&root, old, new - 1);
+                self.as_mut().rust_mut().rows = rows;
+                self.as_mut().end_insert_rows();
+            } else if new < old {
+                self.as_mut().begin_remove_rows(&root, new, old - 1);
+                self.as_mut().rust_mut().rows = rows;
+                self.as_mut().end_remove_rows();
+            } else {
+                self.as_mut().rust_mut().rows = rows;
+            }
+        }
+        let kept = old.min(new);
+        if kept > 0 {
+            let first = self.index(0, 0, &root);
+            let last = self.index(kept - 1, 0, &root);
+            self.as_mut()
+                .data_changed(&first, &last, &QVector::default());
+        }
+        self.as_mut().set_max_cpu(max_cpu);
+        self.as_mut().set_max_memory(max_memory);
+        self.set_count(new);
+    }
+
+    pub fn pid_at(&self, row: i32) -> i32 {
+        usize::try_from(row)
+            .ok()
+            .and_then(|row| self.rows.get(row))
+            .map_or(-1, |p| p.info.pid as i32)
+    }
+
+    pub fn row_of(&self, pid: i32) -> i32 {
+        self.rows
+            .iter()
+            .position(|p| p.info.pid as i32 == pid)
+            .map_or(-1, |row| row as i32)
+    }
+
+    pub fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
+        let Some(process) = usize::try_from(index.row())
+            .ok()
+            .and_then(|row| self.rows.get(row))
+        else {
+            return QVariant::default();
+        };
+        let Process { info, stats } = process;
+        let rate = |r: Option<u64>| r.map_or(-1.0, |r| r as f64);
+        match ROLES.get((role - USER_ROLE) as usize).copied() {
+            Some("pid") => QVariant::from(&(info.pid as i32)),
+            Some("name") => QVariant::from(&QString::from(&info.name)),
+            Some("command") => QVariant::from(&QString::from(&info.command)),
+            Some("user") => QVariant::from(&QString::from(&info.user)),
+            Some("cpu") => QVariant::from(&(stats.cpu as f64)),
+            Some("memory") => QVariant::from(&(stats.memory as f64)),
+            Some("readRate") => QVariant::from(&rate(stats.read_rate)),
+            Some("writeRate") => QVariant::from(&rate(stats.write_rate)),
+            Some("threads") => QVariant::from(&(stats.threads as i32)),
+            Some("state") => QVariant::from(&QString::from(&stats.state.to_string())),
+            Some("nice") => QVariant::from(&stats.nice),
+            Some("mine") => {
+                // SAFETY: see `refresh`.
+                let uid = unsafe { self.monitor().as_ref() }.map(|m| *m.uid());
+                QVariant::from(&(uid == Some(info.uid as i32)))
+            }
+            _ => QVariant::default(),
+        }
+    }
+
+    pub fn role_names(&self) -> QHash<QHashPair_i32_QByteArray> {
+        let mut roles = QHash::<QHashPair_i32_QByteArray>::default();
+        for (i, name) in ROLES.iter().enumerate() {
+            roles.insert(USER_ROLE + i as i32, QByteArray::from(*name));
+        }
+        roles
+    }
+
+    pub fn row_count(&self, _parent: &QModelIndex) -> i32 {
+        self.rows.len() as i32
     }
 }

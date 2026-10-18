@@ -37,6 +37,7 @@ Window {
 
     Monitor {
         id: monitor
+        processesEnabled: header.page === 1
     }
 
     Background {
@@ -54,6 +55,13 @@ Window {
 
             Layout.fillWidth: true
             monitor: monitor
+            page: window.prefs.page ?? 0
+            onPageChanged: {
+                if (window.prefs.page !== page) {
+                    window.prefs.page = page
+                    window.savePrefs()
+                }
+            }
             address: window.prefs.connection.address
             token: window.prefs.connection.token
             onConnectRequested: (address, token) => {
@@ -69,15 +77,41 @@ Window {
             }
         }
 
-        Dashboard {
-            id: dashboard
-
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            monitor: monitor
-            editing: header.editing
-            onEdited: saveLayout.restart()
-            onSettingsRequested: (index, descriptor, values) => widgetSettings.edit(index, descriptor, values)
+
+            Dashboard {
+                id: dashboard
+
+                anchors.fill: parent
+                monitor: monitor
+                editing: header.editing
+                visible: opacity > 0
+                opacity: header.page === 0 ? 1 : 0
+                onEdited: saveLayout.restart()
+                onSettingsRequested: (index, descriptor, values) => widgetSettings.edit(index, descriptor, values)
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 220 }
+                }
+            }
+
+            ProcessesPage {
+                anchors.fill: parent
+                monitor: monitor
+                settings: window.prefs.processes
+                visible: opacity > 0
+                opacity: header.page === 1 ? 1 : 0
+                onSettingsEdited: settings => {
+                    window.prefs.processes = settings
+                    window.savePrefs()
+                }
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 220 }
+                }
+            }
         }
     }
 
@@ -98,6 +132,11 @@ Window {
     Connections {
         target: Config
         function onErrorOccurred(message) { toast.show(message) }
+    }
+
+    Connections {
+        target: monitor
+        function onActionFailed(message) { toast.show(message) }
     }
 
     // Edits come in bursts (drag, then options); write once things settle.

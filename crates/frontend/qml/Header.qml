@@ -7,6 +7,8 @@ RowLayout {
     id: root
 
     required property Monitor monitor
+    /// 0: overview dashboard, 1: processes.
+    property int page: 0
     property bool editing: false
     property string address
     property string token
@@ -17,6 +19,7 @@ RowLayout {
     signal resetRequested()
 
     spacing: 10
+    onPageChanged: editing = false
 
     Item {
         implicitWidth: 14
@@ -61,6 +64,8 @@ RowLayout {
 
     Column {
         Layout.fillWidth: true
+        // See ProcessDetails.Stat: keeps the width from feeding back into itself.
+        Layout.preferredWidth: 1
         spacing: 2
 
         Text {
@@ -77,6 +82,14 @@ RowLayout {
             font.pixelSize: 12
             elide: Text.ElideRight
         }
+    }
+
+    Segmented {
+        visible: !root.editing
+        Layout.rightMargin: 6
+        model: ["Overview", "Processes"]
+        currentIndex: root.page
+        onActivated: index => root.page = index
     }
 
     // Normal mode
@@ -112,7 +125,7 @@ RowLayout {
     }
 
     GlassButton {
-        visible: !root.editing
+        visible: !root.editing && root.page === 0
         iconName: "edit"
         text: "Edit layout"
         onClicked: root.editing = true

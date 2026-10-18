@@ -60,6 +60,22 @@ Adding a widget type: create `crates/frontend/qml/widgets/MyWidget.qml` (it gets
 `monitor` and `options`), register it in `qml/Widgets.qml` with its sizes and
 options, and list the file in `crates/frontend/build.rs`.
 
+## Processes
+
+The Processes page lists everything running on the connected machine: search by
+name, command, user or PID, sort by any column, pick columns and toggle kernel
+threads in the columns menu. Selecting a process opens its details with Pause /
+End (SIGTERM) / Kill (SIGKILL). Keyboard: arrows and Page Up/Down move the
+selection, Delete ends the selected process, Esc closes the details.
+
+The daemon only walks `/proc` while some client has this page open, and then
+sends only what changed since the previous update. It can signal processes of
+its own user; others are refused by the kernel, and PIDs 0 and 1 are never
+signalled. Disk rates of other users' processes need privileges and show as "—".
+
+Grouping processes into applications (including Steam/Proton games) is planned
+as a separate Apps view.
+
 ## Development
 
 - `cargo test` runs the parser, protocol, theme and layout tests.
