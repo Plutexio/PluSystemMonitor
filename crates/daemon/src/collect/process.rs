@@ -5,8 +5,10 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::time::Instant;
 
-use plusysmon_protocol::{ProcessInfo, ProcessStats};
+use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats};
 
+use super::apps::{self, Apps, Assets};
+use super::steam;
 use super::users::Users;
 
 /// Static info is only re-read when a process is new or has exec'd (its comm changed).
@@ -19,7 +21,10 @@ struct Tracked {
 
 pub struct ProcessCollector {
     tracked: HashMap<u32, Tracked>,
+    /// Processes first seen this sample, with their app unit, awaiting classification.
+    unclassified: HashMap<u32, Option<String>>,
     users: Users,
+    apps: Apps,
     page_size: u64,
     ticks_per_second: u64,
     boot_time_ms: u64,
@@ -27,7 +32,7 @@ pub struct ProcessCollector {
 }
 
 impl ProcessCollector {
-    pub fn new() -> Self {
+    pub fn new(assets: Assets) -> Self {
         // SAFETY: sysconf has no preconditions.
         let (page_size, ticks) = unsafe {
             (
@@ -37,7 +42,9 @@ impl ProcessCollector {
         };
         Self {
             tracked: HashMap::new(),
+            unclassified: HashMap::new(),
             users: Users::default(),
+            apps: Apps::new(assets),
             page_size: u64::try_from(page_size).unwrap_or(4096),
             ticks_per_second: u64::try_from(ticks).unwrap_or(100).max(1),
             boot_time_ms: boot_time_ms().unwrap_or(0),
@@ -52,13 +59,14 @@ impl ProcessCollector {
     /// Forgets all history, so the next sample starts fresh.
     pub fn reset(&mut self) {
         self.tracked.clear();
+        self.apps.reset();
         self.last_sample = None;
     }
 
     /// `total_ticks` is the machine-wide CPU time that passed since the previous
     /// call, as measured by the CPU collector, so per-process shares add up to the
-    /// total gauge.
-    pub fn sample(&mut self, total_ticks: u64) -> Vec<(ProcessInfo, ProcessStats)> {
+    /// total gauge. Also returns the apps that are referenced for the first time.
+    pub fn sample(&mut self, total_ticks: u64) -> (Vec<(ProcessInfo, ProcessStats)>, Vec<AppInfo>) {
         let now = Instant::now();
         let elapsed = self
             .last_sample
@@ -67,7 +75,7 @@ impl ProcessCollector {
         self.last_sample = Some(now);
 
         let Ok(entries) = fs::read_dir("/proc") else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
         let mut previous = std::mem::take(&mut self.tracked);
         let mut processes = Vec::with_capacity(previous.len());
@@ -80,7 +88,36 @@ impl ProcessCollector {
                 processes.push(process);
             }
         }
-        processes
+        self.classify(&mut processes);
+        let new_apps = self
+            .apps
+            .take_new(processes.iter().filter_map(|(info, _)| info.app.as_deref()));
+        (processes, new_apps)
+    }
+
+    /// Assigns new processes to apps. Runs after the whole table is read, since a
+    /// game's reaper can be just as new as the game itself.
+    fn classify(&mut self, processes: &mut [(ProcessInfo, ProcessStats)]) {
+        if self.unclassified.is_empty() {
+            return;
+        }
+        let parents: HashMap<u32, (u32, Option<u32>)> = processes
+            .iter()
+            .map(|(info, _)| (info.pid, (info.ppid, steam::launch_app_id(&info.command))))
+            .collect();
+        for (info, _) in processes.iter_mut() {
+            let Some(unit) = self.unclassified.remove(&info.pid) else {
+                continue;
+            };
+            info.app = match steam_game(info.pid, &parents) {
+                Some(game) => Some(self.apps.for_game(game)),
+                None => unit.and_then(|unit| self.apps.for_unit(&unit)),
+            };
+            if let Some(tracked) = self.tracked.get_mut(&info.pid) {
+                tracked.info.app = info.app.clone();
+            }
+        }
+        self.unclassified.clear();
     }
 
     fn read(
@@ -147,6 +184,10 @@ impl ProcessCollector {
 
     fn read_info(&mut self, pid: u32, stat: &Stat, started_ms: u64) -> Option<ProcessInfo> {
         let uid = fs::metadata(format!("/proc/{pid}")).ok()?.uid();
+        let unit = fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .ok()
+            .and_then(|cgroup| apps::app_unit(&cgroup));
+        self.unclassified.insert(pid, unit);
         let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
         let args: Vec<String> = cmdline
             .split(|&b| b == 0)
@@ -163,8 +204,27 @@ impl ProcessCollector {
             uid,
             user: self.users.name(uid),
             started_ms,
+            app: None,
         })
     }
+}
+
+/// The Steam game a process belongs to: the app ID of the nearest
+/// `reaper SteamLaunch` ancestor (or the process itself).
+fn steam_game(pid: u32, parents: &HashMap<u32, (u32, Option<u32>)>) -> Option<u32> {
+    let mut current = pid;
+    // Bounded, in case of a (theoretically impossible) parent cycle.
+    for _ in 0..64 {
+        let &(ppid, game) = parents.get(&current)?;
+        if game.is_some() {
+            return game;
+        }
+        if ppid <= 1 {
+            return None;
+        }
+        current = ppid;
+    }
+    None
 }
 
 struct Stat {
@@ -278,10 +338,63 @@ mod tests {
     }
 
     #[test]
+    fn finds_the_steam_game_ancestor() {
+        // 1 systemd -> 10 steam -> 20 reaper(AppId 42) -> 30 wine -> 40 game
+        let parents = HashMap::from([
+            (10, (1, None)),
+            (20, (10, Some(42))),
+            (30, (20, None)),
+            (40, (30, None)),
+        ]);
+        assert_eq!(steam_game(40, &parents), Some(42));
+        assert_eq!(steam_game(20, &parents), Some(42));
+        assert_eq!(steam_game(10, &parents), None);
+        assert_eq!(steam_game(99, &parents), None);
+    }
+
+    /// `cargo test -p plusysmond live_apps -- --ignored --nocapture` shows how
+    /// this machine's processes are grouped.
+    #[test]
+    #[ignore]
+    fn live_apps() {
+        let assets = Assets::default();
+        let mut collector = ProcessCollector::new(assets.clone());
+        let (processes, apps) = collector.sample(0);
+        for app in &apps {
+            let members: Vec<&str> = processes
+                .iter()
+                .filter(|(info, _)| info.app.as_deref() == Some(app.id.as_str()))
+                .map(|(info, _)| info.name.as_str())
+                .collect();
+            println!(
+                "{:<26} {:<24} {:?} icon={} art={} logo={}  [{}] {:?}",
+                app.id,
+                app.name,
+                app.kind,
+                app.icon.is_some(),
+                app.art.is_some(),
+                app.logo.is_some(),
+                members.len(),
+                &members[..members.len().min(4)]
+            );
+        }
+        let background = processes.iter().filter(|(i, _)| i.app.is_none()).count();
+        println!("background: {background} of {}", processes.len());
+        for (key, path) in assets
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| k.starts_with("steam"))
+        {
+            println!("{key} -> {}", path.display());
+        }
+    }
+
+    #[test]
     fn samples_this_process() {
-        let mut collector = ProcessCollector::new();
+        let mut collector = ProcessCollector::new(Assets::default());
         collector.sample(0);
-        let processes = collector.sample(100);
+        let (processes, _) = collector.sample(100);
         let me = std::process::id();
         let (info, stats) = processes.iter().find(|(info, _)| info.pid == me).unwrap();
         assert!(!info.kernel_thread);

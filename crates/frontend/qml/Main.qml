@@ -37,7 +37,8 @@ Window {
 
     Monitor {
         id: monitor
-        processesEnabled: header.page === 1
+        // Apps are built from processes too.
+        processesEnabled: header.page !== 0
     }
 
     Background {
@@ -97,12 +98,34 @@ Window {
                 }
             }
 
+            AppsPage {
+                anchors.fill: parent
+                monitor: monitor
+                settings: window.prefs.apps
+                visible: opacity > 0
+                opacity: header.page === 1 ? 1 : 0
+                onSettingsEdited: settings => {
+                    window.prefs.apps = settings
+                    window.savePrefs()
+                }
+                onProcessRequested: pid => {
+                    processesPage.selectedPid = pid
+                    header.page = 2
+                }
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 220 }
+                }
+            }
+
             ProcessesPage {
+                id: processesPage
+
                 anchors.fill: parent
                 monitor: monitor
                 settings: window.prefs.processes
                 visible: opacity > 0
-                opacity: header.page === 1 ? 1 : 0
+                opacity: header.page === 2 ? 1 : 0
                 onSettingsEdited: settings => {
                     window.prefs.processes = settings
                     window.savePrefs()

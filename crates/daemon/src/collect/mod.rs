@@ -1,12 +1,18 @@
+mod apps;
 mod cpu;
+mod desktop;
+mod icons;
 mod mem;
 mod process;
+mod steam;
 mod users;
+
+pub use apps::Assets;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use plusysmon_protocol::{ProcessInfo, ProcessStats, Sample};
+use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats, Sample};
 
 pub struct Collector {
     cpu: cpu::CpuCollector,
@@ -14,10 +20,10 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new() -> Result<Self> {
+    pub fn new(assets: Assets) -> Result<Self> {
         Ok(Self {
             cpu: cpu::CpuCollector::new()?,
-            processes: process::ProcessCollector::new(),
+            processes: process::ProcessCollector::new(assets),
         })
     }
 
@@ -34,7 +40,7 @@ impl Collector {
     }
 
     /// Call right after [`Self::sample`], whose CPU totals it divides by.
-    pub fn sample_processes(&mut self) -> Vec<(ProcessInfo, ProcessStats)> {
+    pub fn sample_processes(&mut self) -> (Vec<(ProcessInfo, ProcessStats)>, Vec<AppInfo>) {
         self.processes.sample(self.cpu.elapsed_ticks())
     }
 

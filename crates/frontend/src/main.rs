@@ -1,3 +1,6 @@
+mod app_model;
+mod apps;
+mod assets;
 mod client;
 mod config;
 mod layout;

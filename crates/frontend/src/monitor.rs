@@ -61,6 +61,14 @@ pub mod qobject {
         #[qinvokable]
         fn process_details(&self, pid: i32) -> QString;
 
+        /// Like `send_signal`, for every process of an app.
+        #[qinvokable]
+        fn signal_app(self: Pin<&mut Self>, id: &QString, signal: &QString);
+
+        /// JSON describing an app and its processes, or "" if it has none left.
+        #[qinvokable]
+        fn app_details(&self, id: &QString) -> QString;
+
         /// Emitted after the properties were updated with a fresh sample.
         #[qsignal]
         fn sample_received(self: Pin<&mut Self>);
@@ -70,6 +78,10 @@ pub mod qobject {
 
         #[qsignal]
         fn action_failed(self: Pin<&mut Self>, message: &QString);
+
+        /// An icon or artwork finished downloading.
+        #[qsignal]
+        fn assets_changed(self: Pin<&mut Self>);
     }
 
     impl cxx_qt::Threading for Monitor {}
@@ -162,7 +174,89 @@ pub mod qobject {
         #[inherit]
         fn index(self: &ProcessModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
     }
+
+    extern "RustQt" {
+        #[qobject]
+        #[base = QAbstractListModel]
+        #[qml_element]
+        /// Must outlive the model; in QML both live in the same window.
+        #[qproperty(*mut Monitor, monitor)]
+        /// name, cpu or memory.
+        #[qproperty(QString, sort_key, cxx_name = "sortKey")]
+        #[qproperty(QString, filter)]
+        #[qproperty(i32, count)]
+        /// Processes that belong to no app (services, shells, ...).
+        #[qproperty(i32, background_count, cxx_name = "backgroundCount")]
+        type AppModel = super::AppModelRust;
+
+        /// Rebuilds the rows; call on `processesUpdated` and `assetsChanged`.
+        #[qinvokable]
+        fn refresh(self: Pin<&mut AppModel>);
+
+        #[qinvokable]
+        #[cxx_name = "idAt"]
+        fn id_at(self: &AppModel, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_override]
+        fn data(self: &AppModel, index: &QModelIndex, role: i32) -> QVariant;
+
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "roleNames"]
+        fn role_names(self: &AppModel) -> QHash_i32_QByteArray;
+
+        #[qinvokable]
+        #[cxx_override]
+        #[cxx_name = "rowCount"]
+        fn row_count(self: &AppModel, parent: &QModelIndex) -> i32;
+    }
+
+    impl cxx_qt::Initialize for AppModel {}
+
+    unsafe extern "RustQt" {
+        #[inherit]
+        #[qsignal]
+        #[cxx_name = "dataChanged"]
+        fn data_changed(
+            self: Pin<&mut AppModel>,
+            top_left: &QModelIndex,
+            bottom_right: &QModelIndex,
+            roles: &QVector_i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "beginInsertRows"]
+        unsafe fn begin_insert_rows(
+            self: Pin<&mut AppModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "endInsertRows"]
+        unsafe fn end_insert_rows(self: Pin<&mut AppModel>);
+
+        #[inherit]
+        #[cxx_name = "beginRemoveRows"]
+        unsafe fn begin_remove_rows(
+            self: Pin<&mut AppModel>,
+            parent: &QModelIndex,
+            first: i32,
+            last: i32,
+        );
+
+        #[inherit]
+        #[cxx_name = "endRemoveRows"]
+        unsafe fn end_remove_rows(self: Pin<&mut AppModel>);
+
+        #[inherit]
+        fn index(self: &AppModel, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
+    }
 }
+
+pub use crate::app_model::AppModelRust;
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -172,11 +266,13 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
     QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant, QVector,
 };
-use plusysmon_protocol::{Sample, Signal};
+use plusysmon_protocol::{AppKind, Sample, Signal};
 use serde_json::json;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
+use crate::apps::{self, History};
+use crate::assets::AssetCache;
 use crate::client::{self, Command, Event};
 use crate::processes::{self, Process, ProcessTable, Query};
 
@@ -207,6 +303,8 @@ pub struct MonitorRust {
     cpu_points: VecDeque<f64>,
     mem_points: VecDeque<f64>,
     processes: ProcessTable,
+    app_history: History,
+    assets: AssetCache,
 }
 
 impl Default for MonitorRust {
@@ -233,6 +331,8 @@ impl Default for MonitorRust {
             cpu_points: VecDeque::with_capacity(HISTORY_POINTS),
             mem_points: VecDeque::with_capacity(HISTORY_POINTS),
             processes: ProcessTable::default(),
+            app_history: History::default(),
+            assets: AssetCache::default(),
         }
     }
 }
@@ -305,7 +405,33 @@ impl qobject::Monitor {
         self.set_status(QString::from("Not connected"));
     }
 
-    pub fn send_signal(self: Pin<&mut Self>, pid: i32, signal: &QString) {
+    pub fn send_signal(mut self: Pin<&mut Self>, pid: i32, signal: &QString) {
+        let Ok(pid) = u32::try_from(pid) else { return };
+        let Some(signal) = self.as_mut().signal_checked(signal) else {
+            return;
+        };
+        self.command(Command::Signal { pid, signal });
+    }
+
+    pub fn signal_app(mut self: Pin<&mut Self>, id: &QString, signal: &QString) {
+        let Some(signal) = self.as_mut().signal_checked(signal) else {
+            return;
+        };
+        let id = id.to_string();
+        let pids: Vec<u32> = self
+            .rust()
+            .processes
+            .iter()
+            .filter(|p| p.info.app.as_deref() == Some(id.as_str()))
+            .map(|p| p.info.pid)
+            .collect();
+        for pid in pids {
+            self.command(Command::Signal { pid, signal });
+        }
+    }
+
+    /// Parses a signal name, reporting why nothing can be sent.
+    fn signal_checked(self: Pin<&mut Self>, signal: &QString) -> Option<Signal> {
         let signal = match signal.to_string().as_str() {
             "terminate" => Signal::Terminate,
             "kill" => Signal::Kill,
@@ -314,15 +440,65 @@ impl qobject::Monitor {
             other => {
                 let message = format!("Unknown signal {other:?}");
                 self.action_failed(&QString::from(&message));
-                return;
+                return None;
             }
         };
-        let Ok(pid) = u32::try_from(pid) else { return };
         if !*self.connected() {
             self.action_failed(&QString::from("Not connected to a daemon"));
-            return;
+            return None;
         }
-        self.command(Command::Signal { pid, signal });
+        Some(signal)
+    }
+
+    pub fn app_details(&self, id: &QString) -> QString {
+        let id = id.to_string();
+        let table = &self.rust().processes;
+        let (apps, _) = apps::group(table);
+        let Some(app) = apps.into_iter().find(|app| app.info.id == id) else {
+            return QString::default();
+        };
+        let mut processes: Vec<&Process> =
+            app.pids.iter().filter_map(|&pid| table.get(pid)).collect();
+        processes.sort_by(|a, b| {
+            b.stats
+                .cpu
+                .total_cmp(&a.stats.cpu)
+                .then(a.info.pid.cmp(&b.info.pid))
+        });
+        let details = json!({
+            "id": app.info.id,
+            "name": app.info.name,
+            "game": app.info.kind == AppKind::Game,
+            "icon": self.asset_url(app.info.icon.as_deref()),
+            "art": self.asset_url(app.info.art.as_deref()),
+            "logo": self.asset_url(app.info.logo.as_deref()),
+            "cpu": app.cpu,
+            "memory": app.memory,
+            "readRate": app.read_rate,
+            "writeRate": app.write_rate,
+            "processes": processes.iter().map(|p| json!({
+                "pid": p.info.pid,
+                "name": p.info.name,
+                "cpu": p.stats.cpu,
+                "memory": p.stats.memory,
+            })).collect::<Vec<_>>(),
+        });
+        QString::from(&details.to_string())
+    }
+
+    /// file:// URL of a downloaded asset, or "" (not fetched yet, or none).
+    pub(crate) fn asset_url(&self, key: Option<&str>) -> String {
+        key.and_then(|key| self.rust().assets.url(key))
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    pub(crate) fn processes(&self) -> &ProcessTable {
+        &self.rust().processes
+    }
+
+    pub(crate) fn app_history(&self, id: &str) -> Vec<f64> {
+        self.rust().app_history.get(id)
     }
 
     pub fn process_details(&self, pid: i32) -> QString {
@@ -349,6 +525,7 @@ impl qobject::Monitor {
 
     fn clear_processes(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().processes.clear();
+        self.as_mut().rust_mut().app_history.clear();
         self.as_mut().set_process_count(0);
         self.processes_updated();
     }
@@ -376,6 +553,7 @@ impl qobject::Monitor {
                 if let Some(last) = history.last() {
                     self.as_mut().show(last);
                 }
+                self.as_mut().rust_mut().assets = AssetCache::for_host(&hostname);
                 self.as_mut().set_hostname(QString::from(&hostname));
                 self.as_mut().set_interval_ms(interval_ms as i32);
                 self.as_mut().set_uid(uid as i32);
@@ -388,13 +566,36 @@ impl qobject::Monitor {
                 self.sample_received();
             }
             Event::Processes(update) => {
-                let count = {
-                    let mut rust = self.as_mut().rust_mut();
+                let (count, fetch) = {
+                    let mut pinned = self.as_mut().rust_mut();
+                    let rust: &mut MonitorRust = &mut pinned;
+                    let keys: Vec<String> = update
+                        .apps
+                        .iter()
+                        .flat_map(|app| [&app.icon, &app.art, &app.logo])
+                        .flatten()
+                        .cloned()
+                        .collect();
                     rust.processes.apply(update);
-                    rust.processes.len() as i32
+                    let (apps, _) = apps::group(&rust.processes);
+                    rust.app_history.record(&apps);
+                    let fetch: Vec<String> = keys
+                        .into_iter()
+                        .filter(|key| rust.assets.should_fetch(key))
+                        .collect();
+                    (rust.processes.len() as i32, fetch)
                 };
+                for key in fetch {
+                    self.command(Command::Asset { key });
+                }
                 self.as_mut().set_process_count(count);
                 self.processes_updated();
+            }
+            Event::Asset { key, format, data } => {
+                if let Err(e) = self.as_mut().rust_mut().assets.store(&key, &format, &data) {
+                    eprintln!("plusysmon: dropping asset: {e:#}");
+                }
+                self.assets_changed();
             }
             Event::SignalResult {
                 pid,

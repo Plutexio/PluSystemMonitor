@@ -31,6 +31,11 @@ pub enum Event {
         signal: Signal,
         error: Option<String>,
     },
+    Asset {
+        key: String,
+        format: String,
+        data: Vec<u8>,
+    },
     /// The connection dropped; a reconnect is scheduled.
     Lost(String),
     /// The daemon refused us (bad token, version mismatch); no retry.
@@ -42,6 +47,7 @@ pub enum Event {
 pub enum Command {
     Subscribe { processes: bool },
     Signal { pid: u32, signal: Signal },
+    Asset { key: String },
 }
 
 enum End {
@@ -129,6 +135,7 @@ async fn session(
                         ClientMsg::Subscribe { processes }
                     }
                     Some(Command::Signal { pid, signal }) => ClientMsg::Signal { pid, signal },
+                    Some(Command::Asset { key }) => ClientMsg::Asset { key },
                     // The UI dropped its sender; `stop` ends this thread shortly.
                     None => std::future::pending().await,
                 };
@@ -159,6 +166,7 @@ async fn session(
             ServerMsg::SignalResult { pid, signal, error } => {
                 Event::SignalResult { pid, signal, error }
             }
+            ServerMsg::Asset { key, format, data } => Event::Asset { key, format, data },
             ServerMsg::Error(reason) => return Ok(End::Rejected(reason)),
         };
         if !on_event(event) {

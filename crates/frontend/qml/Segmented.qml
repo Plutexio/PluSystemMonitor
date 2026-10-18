@@ -11,6 +11,10 @@ Item {
 
     signal activated(int index)
 
+    // Bumped as segments come to life; Repeater's count changes before
+    // itemAt() can return them, so it can't drive the pill on its own.
+    property int itemsReady: 0
+
     implicitWidth: row.implicitWidth + 8
     implicitHeight: 38
 
@@ -22,10 +26,7 @@ Item {
     }
 
     Rectangle {
-        readonly property Item target: {
-            repeater.count // re-evaluate once the items exist
-            return repeater.itemAt(root.currentIndex)
-        }
+        readonly property Item target: root.itemsReady > 0 ? repeater.itemAt(root.currentIndex) : null
 
         visible: target !== null
         x: target ? row.x + target.x : 0
@@ -53,6 +54,7 @@ Item {
             id: repeater
 
             model: root.model
+            onItemAdded: root.itemsReady++
 
             delegate: Item {
                 id: segment

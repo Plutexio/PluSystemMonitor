@@ -6,4 +6,5 @@ license.workspace = true
 
 [dependencies]
 rmp-serde.workspace = true
+serde_bytes.workspace = true
 serde.workspace = true

@@ -73,8 +73,34 @@ sends only what changed since the previous update. It can signal processes of
 its own user; others are refused by the kernel, and PIDs 0 and 1 are never
 signalled. Disk rates of other users' processes need privileges and show as "—".
 
-Grouping processes into applications (including Steam/Proton games) is planned
-as a separate Apps view.
+## Apps
+
+The Apps page groups processes into the applications you started, with icons,
+totals, a CPU sparkline per app, and End/Kill for the whole app. Clicking a
+process in an app's details opens it on the Processes page.
+
+How processes are assigned, in order:
+
+1. **Steam games**: everything below Steam's `reaper SteamLaunch AppId=<id>`
+   process. Games run inside Steam's own systemd unit, which is why
+   cgroup-based monitors file them under Steam; the reaper doesn't lie. Names
+   come from the library's `appmanifest_<id>.acf`, artwork and logo from
+   Steam's library cache.
+2. **Desktop apps**: the systemd unit desktop sessions start apps in
+   (`app-<id>@….service`, `app-<launcher>-<id>-<pid>.scope`), matched to a
+   `.desktop` file for the name and icon (looked up in your icon theme).
+3. Everything else counts as a background process.
+
+Known limits: programs started from a terminal belong to the terminal's app,
+and all Chromium-based browsers share one unit (`org.chromium.Chromium`), so a
+browser and its installed web apps can't be told apart.
+
+Icons and artwork are fetched from the daemon (so they work for remote
+machines too; it only serves files it registered itself) and cached in
+`~/.cache/plusysmon/assets/`.
+
+`cargo test -p plusysmond live_apps -- --ignored --nocapture` prints how the
+current machine's processes are grouped.
 
 ## Development
 

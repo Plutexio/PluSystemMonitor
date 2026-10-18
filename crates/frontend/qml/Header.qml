@@ -7,7 +7,7 @@ RowLayout {
     id: root
 
     required property Monitor monitor
-    /// 0: overview dashboard, 1: processes.
+    /// 0: overview dashboard, 1: apps, 2: processes.
     property int page: 0
     property bool editing: false
     property string address
@@ -87,7 +87,7 @@ RowLayout {
     Segmented {
         visible: !root.editing
         Layout.rightMargin: 6
-        model: ["Overview", "Processes"]
+        model: ["Overview", "Apps", "Processes"]
         currentIndex: root.page
         onActivated: index => root.page = index
     }

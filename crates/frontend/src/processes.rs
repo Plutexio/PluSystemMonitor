@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use plusysmon_protocol::{ProcessInfo, ProcessStats, ProcessUpdate};
+use plusysmon_protocol::{AppInfo, ProcessInfo, ProcessStats, ProcessUpdate};
 
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -15,12 +15,17 @@ pub struct Process {
 #[derive(Default)]
 pub struct ProcessTable {
     processes: HashMap<u32, Process>,
+    apps: HashMap<String, AppInfo>,
 }
 
 impl ProcessTable {
     pub fn apply(&mut self, update: ProcessUpdate) {
         if update.full {
             self.processes.clear();
+            self.apps.clear();
+        }
+        for app in update.apps {
+            self.apps.insert(app.id.clone(), app);
         }
         for pid in update.removed {
             self.processes.remove(&pid);
@@ -48,6 +53,7 @@ impl ProcessTable {
 
     pub fn clear(&mut self) {
         self.processes.clear();
+        self.apps.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -56,6 +62,14 @@ impl ProcessTable {
 
     pub fn get(&self, pid: u32) -> Option<&Process> {
         self.processes.get(&pid)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Process> {
+        self.processes.values()
+    }
+
+    pub fn app(&self, id: &str) -> Option<&AppInfo> {
+        self.apps.get(id)
     }
 }
 
@@ -130,6 +144,7 @@ mod tests {
             user: if uid == 0 { "root" } else { "me" }.to_owned(),
             started_ms: 0,
             kernel_thread: name.starts_with("kworker"),
+            app: None,
         };
         let stats = ProcessStats {
             pid,
@@ -159,6 +174,7 @@ mod tests {
             removed: vec![],
             added,
             stats,
+            apps: vec![],
         });
         table
     }
@@ -215,6 +231,7 @@ mod tests {
             removed: vec![10],
             added: vec![info],
             stats: vec![stats],
+            apps: vec![],
         });
         assert!(table.get(10).is_none());
         assert_eq!(table.get(20).unwrap().stats.cpu, 1.0);

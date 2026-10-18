@@ -196,6 +196,8 @@ Item {
             id: scrollBar
             width: 10
             contentItem: Rectangle {
+                // A custom handle skips the style's "only when needed" logic.
+                visible: scrollBar.size < 1.0
                 implicitWidth: 6
                 radius: 3
                 color: Theme.textDim

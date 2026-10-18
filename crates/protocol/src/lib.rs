@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any incompatible change to the message types.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -30,6 +30,10 @@ pub enum ClientMsg {
     Signal {
         pid: u32,
         signal: Signal,
+    },
+    /// Fetch an icon or artwork named by an [`AppInfo`].
+    Asset {
+        key: String,
     },
 }
 
@@ -60,6 +64,14 @@ pub enum ServerMsg {
         pid: u32,
         signal: Signal,
         error: Option<String>,
+    },
+    /// Answer to [`ClientMsg::Asset`]; `data` is empty if the asset is unavailable.
+    Asset {
+        key: String,
+        /// File extension: png, svg, jpg, ...
+        format: String,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
     },
     /// Sent right before the daemon closes the connection.
     Error(String),
@@ -100,6 +112,29 @@ pub struct ProcessUpdate {
     pub added: Vec<ProcessInfo>,
     /// Only processes whose numbers changed (all of them for added processes).
     pub stats: Vec<ProcessStats>,
+    /// Applications referenced by processes for the first time.
+    pub apps: Vec<AppInfo>,
+}
+
+/// An application processes are grouped under.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AppInfo {
+    /// `desktop:<desktop file id>` or `steam:<app id>`.
+    pub id: String,
+    pub name: String,
+    pub kind: AppKind,
+    /// Asset keys, see [`ClientMsg::Asset`].
+    pub icon: Option<String>,
+    /// Wide artwork (games).
+    pub art: Option<String>,
+    /// Transparent title logo (games).
+    pub logo: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AppKind {
+    App,
+    Game,
 }
 
 /// What doesn't change over a process' lifetime (or rarely matters if it does).
@@ -115,6 +150,8 @@ pub struct ProcessInfo {
     /// Milliseconds since the Unix epoch.
     pub started_ms: u64,
     pub kernel_thread: bool,
+    /// [`AppInfo::id`] of the application this process belongs to, if any.
+    pub app: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

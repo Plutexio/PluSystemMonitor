@@ -16,10 +16,13 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::error::{Error as WsError, ProtocolError};
 use tracing::{info, warn};
 
+use crate::collect::Assets;
 use crate::table::ProcessTable;
 use crate::token;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Icons and artwork are small; anything bigger is not what we registered.
+const MAX_ASSET_BYTES: u64 = 4 * 1024 * 1024;
 
 pub struct Shared {
     pub hostname: String,
@@ -35,6 +38,8 @@ pub struct Shared {
     pub process_updates: broadcast::Sender<Arc<ProcessUpdate>>,
     /// The sampler only walks /proc while this is non-zero.
     pub process_subscribers: AtomicUsize,
+    /// Files clients may fetch, registered while describing apps.
+    pub assets: Assets,
 }
 
 pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
@@ -147,6 +152,10 @@ async fn handle(stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) -> Res
                             processes = None;
                         }
                     }
+                    ClientMsg::Asset { key } => {
+                        let (format, data) = read_asset(&shared.assets, &key);
+                        send(&mut ws, &ServerMsg::Asset { key, format, data }).await?;
+                    }
                     ClientMsg::Signal { pid, signal } => {
                         let error = send_signal(pid, signal).err();
                         info!(%peer, pid, ?signal, error = error.as_deref().unwrap_or("none"), "signal");
@@ -194,6 +203,29 @@ async fn recv_processes(
     }
 }
 
+/// Unknown keys get an empty answer: clients can only fetch what we handed out.
+fn read_asset(assets: &Assets, key: &str) -> (String, Vec<u8>) {
+    let Some(path) = assets.lock().unwrap().get(key).cloned() else {
+        return (String::new(), Vec::new());
+    };
+    let format = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    let data = std::fs::File::open(&path)
+        .and_then(|file| {
+            use std::io::Read;
+            let mut data = Vec::new();
+            file.take(MAX_ASSET_BYTES + 1).read_to_end(&mut data)?;
+            Ok(data)
+        })
+        .ok()
+        .filter(|data| data.len() as u64 <= MAX_ASSET_BYTES)
+        .unwrap_or_default();
+    (format, data)
+}
+
 fn send_signal(pid: u32, signal: Signal) -> Result<(), String> {
     // 0 and negative PIDs address process groups, and -1 means "everything we
     // can reach"; PID 1 is init. None of those should ever come from a click.
@@ -211,15 +243,37 @@ fn send_signal(pid: u32, signal: Signal) -> Result<(), String> {
     };
     // SAFETY: kill has no memory-safety preconditions.
     if unsafe { libc::kill(target, number) } == 0 {
-        Ok(())
-    } else {
-        Err(std::io::Error::last_os_error().to_string())
+        return Ok(());
     }
+    let error = std::io::Error::last_os_error();
+    // Already gone is what ending a process (or a whole app) was meant to achieve.
+    if error.raw_os_error() == Some(libc::ESRCH)
+        && matches!(signal, Signal::Terminate | Signal::Kill)
+    {
+        return Ok(());
+    }
+    Err(error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn serves_only_registered_assets() {
+        let assets = Assets::default();
+        let file = std::env::temp_dir().join(format!("plusysmon-asset-{}.png", std::process::id()));
+        std::fs::write(&file, b"png").unwrap();
+        assets.lock().unwrap().insert("icon:x".into(), file);
+        assert_eq!(
+            read_asset(&assets, "icon:x"),
+            ("png".into(), b"png".to_vec())
+        );
+        assert_eq!(
+            read_asset(&assets, "/etc/passwd"),
+            (String::new(), Vec::new())
+        );
+    }
 
     #[test]
     fn refuses_dangerous_pids() {

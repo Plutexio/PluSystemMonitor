@@ -12,7 +12,23 @@ pub struct Prefs {
     /// The page shown last (0 overview, 1 processes), restored on start.
     pub page: u8,
     pub connection: Connection,
+    pub apps: AppView,
     pub processes: ProcessView,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppView {
+    /// name, cpu or memory.
+    pub sort: String,
+}
+
+impl Default for AppView {
+    fn default() -> Self {
+        Self {
+            sort: "name".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,6 +56,7 @@ impl Default for Prefs {
             theme: DEFAULT_THEME.to_owned(),
             page: 0,
             connection: Connection::default(),
+            apps: AppView::default(),
             processes: ProcessView::default(),
         }
     }

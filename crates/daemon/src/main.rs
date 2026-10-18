@@ -79,6 +79,7 @@ fn main() -> Result<()> {
         history: Mutex::new(VecDeque::with_capacity(capacity)),
         samples: broadcast::channel(16).0,
         processes: Mutex::default(),
+        assets: collect::Assets::default(),
         process_updates: broadcast::channel(16).0,
         process_subscribers: AtomicUsize::new(0),
     });
@@ -107,7 +108,7 @@ fn main() -> Result<()> {
 }
 
 async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: u32) {
-    let mut collector = match collect::Collector::new() {
+    let mut collector = match collect::Collector::new(shared.assets.clone()) {
         Ok(c) => c,
         Err(e) => {
             error!("cannot start collector: {e:#}");
@@ -139,9 +140,9 @@ async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: 
 
         // Walking /proc costs a few milliseconds, so only do it while someone looks.
         if shared.process_subscribers.load(Ordering::Relaxed) > 0 {
-            let current = collector.sample_processes();
+            let (current, new_apps) = collector.sample_processes();
             let mut processes = shared.processes.lock().unwrap();
-            let update = processes.update(current);
+            let update = processes.update(current, new_apps);
             if !table::is_empty(&update) {
                 let _ = shared.process_updates.send(Arc::new(update));
             }
