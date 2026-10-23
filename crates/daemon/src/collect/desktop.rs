@@ -1,12 +1,15 @@
 //! Installed applications, from .desktop files (freedesktop Desktop Entry spec).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Re-scan at most this often, and only when a lookup misses.
 const RESCAN_AFTER: Duration = Duration::from_secs(60);
+
+/// Steam's own desktop IDs (native, Flatpak).
+const STEAM_IDS: &[&str] = &["steam", "com.valvesoftware.steam"];
 
 #[derive(Debug, Clone)]
 pub struct DesktopEntry {
@@ -25,6 +28,8 @@ pub struct DesktopIndex {
     /// `ids` so they can never shadow a real ID: Steam's game shortcuts all run
     /// `steam steam://rungameid/...` and would otherwise claim "steam".
     hints: HashMap<String, usize>,
+    /// Entries that are Steam game shortcuts (`steam://rungameid/...`).
+    steam_shortcuts: HashSet<usize>,
     scanned_at: Option<Instant>,
 }
 
@@ -36,14 +41,22 @@ impl DesktopIndex {
         if !known(self) && stale {
             self.scan();
         }
-        let index = self.ids.get(&key).or_else(|| self.hints.get(&key))?;
-        Some(self.entries[*index].clone())
+        let mut index = *self.ids.get(&key).or_else(|| self.hints.get(&key))?;
+        // Launched from a game's shortcut while Steam wasn't running, the Steam
+        // client itself ends up in the game's unit and stays there after the
+        // game quits. The game is recognized by its reaper anyway, so whatever
+        // else runs in that unit is Steam.
+        if self.steam_shortcuts.contains(&index) {
+            index = STEAM_IDS.iter().find_map(|id| self.ids.get(*id).copied())?;
+        }
+        Some(self.entries[index].clone())
     }
 
     fn scan(&mut self) {
         self.entries.clear();
         self.ids.clear();
         self.hints.clear();
+        self.steam_shortcuts.clear();
         self.scanned_at = Some(Instant::now());
         // Earlier directories take precedence, so the first entry for an ID wins.
         for dir in data_dirs() {
@@ -67,6 +80,9 @@ impl DesktopIndex {
                     icon: parsed.icon,
                 });
                 self.ids.insert(id.to_lowercase(), index);
+                if parsed.steam_game {
+                    self.steam_shortcuts.insert(index);
+                }
                 for key in parsed.wm_class.into_iter().chain(parsed.exec) {
                     self.hints.entry(key.to_lowercase()).or_insert(index);
                 }
@@ -125,6 +141,8 @@ struct Parsed {
     icon: Option<String>,
     wm_class: Option<String>,
     exec: Option<String>,
+    /// A Steam game shortcut: runs `steam steam://rungameid/<id>` or similar.
+    steam_game: bool,
 }
 
 /// Launchers that say nothing about which application they start.
@@ -134,6 +152,7 @@ fn parse(text: &str) -> Option<Parsed> {
     let mut in_entry = false;
     let (mut name, mut icon, mut wm_class, mut exec) = (None, None, None, None);
     let mut application = false;
+    let mut steam_game = false;
     for line in text.lines() {
         let line = line.trim();
         if line.starts_with('[') {
@@ -152,7 +171,10 @@ fn parse(text: &str) -> Option<Parsed> {
             "Name" => name = Some(value),
             "Icon" if !value.is_empty() => icon = Some(value),
             "StartupWMClass" if !value.is_empty() => wm_class = Some(value),
-            "Exec" => exec = exec_name(&value),
+            "Exec" => {
+                steam_game = value.contains("steam://rungameid/");
+                exec = exec_name(&value);
+            }
             "Type" => application = value == "Application",
             "Hidden" if value == "true" => return None,
             _ => {}
@@ -166,6 +188,7 @@ fn parse(text: &str) -> Option<Parsed> {
         icon,
         wm_class,
         exec,
+        steam_game,
     })
 }
 
@@ -193,8 +216,18 @@ mod tests {
                 icon: Some("zen-browser".into()),
                 wm_class: Some("zen".into()),
                 exec: Some("zen-browser".into()),
+                steam_game: false,
             })
         );
+    }
+
+    #[test]
+    fn recognizes_steam_game_shortcuts() {
+        let text = "[Desktop Entry]\nName=Timberborn\nExec=steam steam://rungameid/1062090\n\
+                    Icon=steam_icon_1062090\nType=Application\n";
+        assert!(parse(text).is_some_and(|p| p.steam_game));
+        let steam = "[Desktop Entry]\nName=Steam\nExec=/usr/bin/steam %U\nType=Application\n";
+        assert!(parse(steam).is_some_and(|p| !p.steam_game));
     }
 
     #[test]
