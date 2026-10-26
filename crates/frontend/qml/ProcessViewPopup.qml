@@ -1,8 +1,9 @@
 import QtQuick
+import QtQuick.Templates as T
 import PluSystemMonitor
 
 // Which columns the process list shows, and whether kernel threads are listed.
-GlassPopup {
+StyledPopover {
     id: root
 
     property var allColumns: []
@@ -13,64 +14,79 @@ GlassPopup {
     signal columnsEdited(var columns)
     signal kernelThreadsToggled()
 
-    title: "Columns"
-    width: 280
+    title: qsTr("Columns")
+    symbol: "view_column"
+    iconShape: "cookie7"
+    width: 300
 
-    component OptionRow: Item {
+    component OptionRow: RippleButton {
         id: option
 
         property string label
-        property bool checked
-
-        signal toggled()
+        property bool value
 
         width: parent.width
-        height: 32
+        height: 40
+        buttonRadius: Appearance.rounding.small
+        colBackgroundHover: Appearance.colors.layer2Hover
+        colRipple: Appearance.colors.layer2Active
+        bounce: false
 
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: option.label
-            color: Theme.text
-            font.pixelSize: 14
-        }
-        Toggle {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            checked: option.checked
-            onToggled: option.toggled()
+        contentItem: Item {
+            StyledText {
+                x: 4
+                anchors.verticalCenter: parent.verticalCenter
+                text: option.label
+            }
+            StyledSwitch {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                checked: option.value
+                onClicked: option.clicked()
+            }
         }
     }
 
-    contentItem: Column {
-        spacing: 4
+    // It scrolls once it would run past the window.
+    contentItem: Flickable {
+        implicitWidth: options.implicitWidth
+        implicitHeight: Math.min(options.implicitHeight, 440)
+        contentHeight: options.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
 
-        Repeater {
-            model: root.allColumns
+        T.ScrollBar.vertical: StyledScrollBar {}
+
+        Column {
+            id: options
+
+            width: parent.width
+            spacing: 2
+
+            Repeater {
+                model: root.allColumns
+
+                OptionRow {
+                    required property string modelData
+                    label: root.columnDefs[modelData].title
+                    value: root.columns.includes(modelData)
+                    // Keep the canonical column order no matter the click order.
+                    onClicked: root.columnsEdited(root.allColumns.filter(key =>
+                        key === modelData ? !value : root.columns.includes(key)))
+                }
+            }
+
+            SectionLabel {
+                width: parent.width
+                inset: 4
+                text: qsTr("Filters")
+            }
 
             OptionRow {
-                required property string modelData
-                label: root.columnDefs[modelData].title
-                checked: root.columns.includes(modelData)
-                // Keep the canonical column order no matter the click order.
-                onToggled: root.columnsEdited(root.allColumns.filter(key =>
-                    key === modelData ? !checked : root.columns.includes(key)))
+                label: qsTr("Kernel Threads")
+                value: root.showKernelThreads
+                onClicked: root.kernelThreadsToggled()
             }
-        }
-
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: Theme.cardBorder
-        }
-        Item {
-            width: 1
-            height: 6
-        }
-
-        OptionRow {
-            label: "Kernel threads"
-            checked: root.showKernelThreads
-            onToggled: root.kernelThreadsToggled()
         }
     }
 }

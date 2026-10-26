@@ -1,166 +1,340 @@
 import QtQuick
-import QtQuick.Layouts
 import PluSystemMonitor
 
+// The frameless window: the drawer on layer0, the content sheet beside it
+// with a top bar that has no background, and the inspector sheet that opens
+// on a spring when something is picked. 8 px of window between them all.
 Window {
     id: window
 
     property var prefs: JSON.parse(Config.preferences())
+    property int page: prefs.page ?? 0
+    property bool editing: false
+    readonly property bool maximized: visibility === Window.Maximized || visibility === Window.FullScreen
+    readonly property real gutter: Appearance.sizes.gutter
+    readonly property bool systemDark: Application.styleHints.colorScheme !== Qt.ColorScheme.Light
+    readonly property bool wantsDark: prefs.theme_mode === "light" ? false : prefs.theme_mode === "dark" ? true : systemDark
+
+    readonly property var pageInfo: [
+        { title: qsTr("Overview"), key: "overview" },
+        { title: qsTr("Apps"), key: "apps" },
+        { title: qsTr("Processes"), key: "processes" }
+    ]
 
     function savePrefs() {
         Config.savePreferences(JSON.stringify(prefs))
     }
 
-    // Crossfade: freeze the current look in a snapshot, switch underneath, fade it out.
-    function switchTheme(id) {
-        if (id === Theme.current)
+    function setPref(key, value) {
+        prefs[key] = value
+        prefs = Object.assign({}, prefs)
+        savePrefs()
+    }
+
+    function applyScheme() {
+        Appearance.applyScheme(JSON.parse(Config.scheme(prefs.theme, wantsDark)))
+    }
+
+    // Crossfade: freeze the current look in a snapshot, switch underneath,
+    // fade the snapshot out.
+    function changeTheme(change) {
+        if (Appearance.performanceMode) {
+            change()
+            applyScheme()
             return
+        }
         const dpr = Screen.devicePixelRatio
         window.contentItem.grabToImage(result => {
             snapshot.source = result.url
             snapshot.opacity = 1
-            if (Theme.load(id)) {
-                prefs.theme = id
-                savePrefs()
-            }
+            change()
+            applyScheme()
             fade.restart()
         }, Qt.size(window.width * dpr, window.height * dpr))
     }
 
-    width: 1180
+    width: 1280
     height: 860
     minimumWidth: 820
     minimumHeight: 560
     visible: true
-    color: Theme.background
+    flags: Qt.Window | Qt.FramelessWindowHint
+    color: "transparent"
     title: monitor.hostname ? monitor.hostname + " — PluSystemMonitor" : "PluSystemMonitor"
+
+    onPageChanged: {
+        editing = false
+        if (prefs.page !== page)
+            setPref("page", page)
+    }
+    onWantsDarkChanged: applyScheme()
+
+    Binding {
+        target: Appearance
+        property: "reduceMotionSetting"
+        value: window.prefs.reduce_motion ?? false
+    }
+    Binding {
+        target: Appearance
+        property: "performanceMode"
+        value: window.prefs.performance_mode ?? false
+    }
+    Binding {
+        target: Appearance
+        property: "noShapes"
+        value: window.prefs.no_shapes ?? false
+    }
 
     Monitor {
         id: monitor
         // Apps are built from processes too, as are app and game widget sources.
-        processesEnabled: header.page !== 0 || dashboard.usesProcesses
+        processesEnabled: window.page !== 0 || dashboard.usesProcesses
     }
 
-    Background {
+    // The window itself: layer0, rounded unless maximised.
+    Rectangle {
+        id: frame
+
         anchors.fill: parent
-        running: window.visibility !== Window.Minimized && window.visibility !== Window.Hidden
-    }
+        radius: window.maximized ? 0 : Appearance.rounding.window
+        color: Appearance.colors.layer0
+        border.width: window.maximized ? 0 : 1
+        border.color: Appearance.colors.layer0Border
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 28
-        spacing: Theme.spacing + 8
+        Sidebar {
+            id: sidebar
 
-        Header {
-            id: header
-
-            Layout.fillWidth: true
+            x: window.gutter
+            y: 0
+            width: preferredWidth
+            height: parent.height
+            window: window
             monitor: monitor
-            page: window.prefs.page ?? 0
-            onPageChanged: {
-                if (window.prefs.page !== page) {
-                    window.prefs.page = page
-                    window.savePrefs()
+            page: window.page
+            preferredWidth: window.prefs.sidebar_width ?? Appearance.sizes.sidebarWidth
+            onPageRequested: index => window.page = index
+            onConnectionRequested: connectionDialog.open()
+            onAppearanceRequested: appearanceDialog.open()
+            onWidthEdited: width => window.setPref("sidebar_width", width)
+        }
+
+        // The content sheet.
+        Rectangle {
+            id: sheet
+
+            x: sidebar.x + sidebar.width + window.gutter
+            y: window.gutter
+            width: inspector.x - window.gutter - x
+            height: parent.height - 2 * window.gutter
+            radius: Appearance.rounding.large
+            color: Appearance.colors.layer1
+            clip: true
+
+            // Faint shapes behind the page's title, a layout of its own for
+            // each page, cut off by the sheet's top edge and kept out of
+            // the page below.
+            Item {
+                width: parent.width
+                height: Appearance.sizes.topBarHeight
+                clip: true
+
+                Stickers {
+                    anchors.fill: parent
+                    key: window.pageInfo[window.page].key
+                    count: 4
+                    minimumSize: 50
+                    maximumSize: 110
+                    fromY: -0.5
+                    toY: 0
+                    strength: 0.8
                 }
             }
-            address: window.prefs.connection.address
-            token: window.prefs.connection.token
-            onConnectRequested: (address, token) => {
-                window.prefs.connection = { address: address, token: token }
-                window.savePrefs()
-                monitor.connectTo(address, token)
+
+            Item {
+                id: pages
+
+                anchors.fill: parent
+
+                Dashboard {
+                    id: dashboard
+
+                    anchors.fill: parent
+                    topMargin: Appearance.sizes.topBarHeight
+                    leftMargin: Appearance.sizes.pageMargin
+                    rightMargin: Appearance.sizes.pageMargin
+                    bottomMargin: Appearance.sizes.pageMargin
+                    monitor: monitor
+                    editing: window.editing
+                    visible: opacity > 0
+                    opacity: window.page === 0 ? 1 : 0
+                    onEdited: saveLayout.restart()
+                    onSettingsRequested: (index, descriptor, values) => widgetSettings.edit(index, descriptor, values)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Appearance.duration(220) }
+                    }
+                }
+
+                AppsPage {
+                    id: appsPage
+
+                    anchors.fill: parent
+                    anchors.topMargin: Appearance.sizes.topBarHeight
+                    monitor: monitor
+                    settings: window.prefs.apps
+                    visible: opacity > 0
+                    opacity: window.page === 1 ? 1 : 0
+                    onSettingsEdited: settings => window.setPref("apps", settings)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Appearance.duration(220) }
+                    }
+                }
+
+                ProcessesPage {
+                    id: processesPage
+
+                    anchors.fill: parent
+                    anchors.topMargin: Appearance.sizes.topBarHeight
+                    monitor: monitor
+                    settings: window.prefs.processes
+                    visible: opacity > 0
+                    opacity: window.page === 2 ? 1 : 0
+                    onSettingsEdited: settings => window.setPref("processes", settings)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Appearance.duration(220) }
+                    }
+                }
             }
-            onThemeSelected: id => window.switchTheme(id)
-            onAddWidgetRequested: type => dashboard.add(type)
-            onResetRequested: {
-                dashboard.load(Config.defaultLayout())
-                saveLayout.restart()
+
+            TopBar {
+                id: topBar
+
+                width: parent.width
+                height: Appearance.sizes.topBarHeight
+                window: window
+                monitor: monitor
+                title: window.pageInfo[window.page].title
+                page: window.page
+                editing: window.editing
+                columnDefs: processesPage.columnDefs
+                allColumns: processesPage.allColumns
+                processSettings: window.prefs.processes
+                onEditRequested: window.editing = true
+                onDoneRequested: window.editing = false
+                onAddWidgetRequested: type => dashboard.add(type)
+                onResetRequested: {
+                    dashboard.load(Config.defaultLayout())
+                    saveLayout.restart()
+                }
+                onProcessSettingsEdited: settings => window.setPref("processes", settings)
+            }
+
+            Snackbar {
+                id: snackbar
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 16
+                z: 50
+            }
+
+            // What fills the sheet clips square; these round its corners off.
+            CornerCaps {
+                anchors.fill: parent
+                radius: sheet.radius
+                color: Appearance.colors.layer0
+                z: 60
             }
         }
 
+        // The inspector: what's picked on the Apps or Processes page. It
+        // opens on a spring, so the page beside it gives a little too, and
+        // stays shut while the page would be left narrower than 404 px.
         Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            id: inspector
 
-            Dashboard {
-                id: dashboard
+            readonly property bool wanted: (window.page === 1 && appsPage.selectedId !== "")
+                                           || (window.page === 2 && processesPage.selectedPid >= 0)
+            readonly property bool roomy: frame.width - sheet.x - Appearance.sizes.sideSheetWidth - 2 * window.gutter >= 404
+            property real openness: wanted && roomy ? 1 : 0
 
-                anchors.fill: parent
-                monitor: monitor
-                editing: header.editing
-                visible: opacity > 0
-                opacity: header.page === 0 ? 1 : 0
-                onEdited: saveLayout.restart()
-                onSettingsRequested: (index, descriptor, values) => widgetSettings.edit(index, descriptor, values)
+            x: frame.width - window.gutter - openness * (Appearance.sizes.sideSheetWidth + window.gutter)
+            y: window.gutter
+            width: Appearance.sizes.sideSheetWidth
+            height: parent.height - 2 * window.gutter
+            visible: openness > 0.001
 
-                Behavior on opacity {
-                    NumberAnimation { duration: 220 }
-                }
+            Behavior on openness {
+                enabled: !Appearance.performanceMode
+                SpringAnimation { spring: 4; damping: 0.32; epsilon: 0.002 }
             }
 
-            AppsPage {
+            AppDetails {
                 anchors.fill: parent
+                visible: window.page === 1
                 monitor: monitor
-                settings: window.prefs.apps
-                visible: opacity > 0
-                opacity: header.page === 1 ? 1 : 0
-                onSettingsEdited: settings => {
-                    window.prefs.apps = settings
-                    window.savePrefs()
-                }
+                appId: appsPage.selectedId
+                onCloseRequested: appsPage.selectedId = ""
                 onProcessRequested: pid => {
                     processesPage.selectedPid = pid
-                    header.page = 2
-                }
-
-                Behavior on opacity {
-                    NumberAnimation { duration: 220 }
+                    window.page = 2
                 }
             }
 
-            ProcessesPage {
-                id: processesPage
-
+            ProcessDetails {
                 anchors.fill: parent
+                visible: window.page === 2
                 monitor: monitor
-                settings: window.prefs.processes
-                visible: opacity > 0
-                opacity: header.page === 2 ? 1 : 0
-                onSettingsEdited: settings => {
-                    window.prefs.processes = settings
-                    window.savePrefs()
-                }
-
-                Behavior on opacity {
-                    NumberAnimation { duration: 220 }
-                }
+                pid: processesPage.selectedPid
+                onCloseRequested: processesPage.selectedPid = -1
+                onPidRequested: pid => processesPage.selectedPid = pid
             }
+        }
+
+        WindowEdges {
+            anchors.fill: parent
+            visible: !window.maximized
+            window: window
+            z: 100
         }
     }
 
     WidgetSettings {
         id: widgetSettings
-        anchors.centerIn: parent
         monitor: monitor
         onValuesEdited: values => dashboard.setOptions(index, values)
     }
 
-    Toast {
-        id: toast
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
-        z: 50
+    ConnectionDialog {
+        id: connectionDialog
+        monitor: monitor
+        address: window.prefs.connection.address
+        token: window.prefs.connection.token
+        onConnectRequested: (address, token) => {
+            window.setPref("connection", { address: address, token: token })
+            monitor.connectTo(address, token)
+        }
+    }
+
+    AppearanceDialog {
+        id: appearanceDialog
+        prefs: window.prefs
+        dark: window.wantsDark
+        onThemeSelected: id => window.changeTheme(() => window.setPref("theme", id))
+        onModeSelected: mode => window.changeTheme(() => window.setPref("theme_mode", mode))
+        onPreferenceEdited: (key, value) => window.setPref(key, value)
     }
 
     Connections {
         target: Config
-        function onErrorOccurred(message) { toast.show(message) }
+        function onErrorOccurred(message) { snackbar.show(message) }
+        function onSchemeFilesChanged() { window.applyScheme() }
     }
 
     Connections {
         target: monitor
-        function onActionFailed(message) { toast.show(message) }
+        function onActionFailed(message) { snackbar.show(message) }
     }
 
     // Edits come in bursts (drag, then options); write once things settle.
@@ -172,8 +346,8 @@ Window {
 
     Shortcut {
         sequence: "Escape"
-        enabled: header.editing
-        onActivated: header.editing = false
+        enabled: window.editing
+        onActivated: window.editing = false
     }
 
     Image {
@@ -195,8 +369,7 @@ Window {
     }
 
     Component.onCompleted: {
-        if (!Theme.load(prefs.theme))
-            Theme.load("aurora")
+        applyScheme()
         dashboard.load(Config.layout())
         monitor.connectTo(prefs.connection.address, prefs.connection.token)
     }

@@ -17,6 +17,31 @@ cargo run --release -p plusysmon           # connects to 127.0.0.1 automatically
 
 Requires Qt 6.6+ (`qt6-base`, `qt6-declarative`).
 
+### Installing
+
+```sh
+./install.sh                      # builds and installs to ~/.local
+```
+
+This puts `plusysmon` and `plusysmond` in `~/.local/bin`, adds
+PluSystemMonitor to the application menu, and enables the daemon as a systemd
+user service, so it runs whenever you are logged in:
+
+```sh
+systemctl --user status plusysmond
+journalctl --user -u plusysmond   # its log
+systemctl --user edit plusysmond  # extra options, see below
+```
+
+```ini
+[Service]
+Environment="PLUSYSMOND_ARGS=--listen 0.0.0.0:7878"
+```
+
+Run `./install.sh` again after pulling to update (it restarts the daemon).
+Other options: `--prefix /usr/local` (asks for sudo), `--no-service`,
+`--no-build`, `--uninstall` (keeps `~/.config/plusysmon`).
+
 ### Remote machines
 
 ```sh
@@ -27,31 +52,63 @@ cat ~/.config/plusysmon/token              # paste this into the frontend
 On localhost the frontend reads the token file itself. Traffic is **not encrypted
 yet**, so only expose the daemon on networks you trust.
 
-## Themes
+## Look and themes
 
-Built in: Aurora (default), Frost, Daylight. Pick one with the drop button in the
-header. To make your own, put a TOML file in `~/.config/plusysmon/themes/` (the
-"Open themes folder" button creates it). A theme only needs what it changes:
+The interface follows the Swiftify style guide: Material 3 Expressive as end4's
+dots-hyprland draws it, with Material colour roles, shapes from Material's shape
+library, springy motion and round "bubbly" titles in Google Sans Flex. Icons are
+Material Symbols Rounded. Both fonts are used from the system when installed,
+otherwise from `<prefix>/share/plusysmon/fonts` (`install.sh` downloads them),
+`~/.local/share/plusysmon/fonts` or Swiftify's copy.
+
+Colours come from a theme, picked under **Appearance** in the drawer:
+
+- **Desktop** (default): the Material scheme Matugen generated for your
+  wallpaper (end4's quickshell, `~/.config/matugen`, DankMaterialShell, …),
+  reloaded live when it changes. Without one it falls back to the app's accent.
+- **PluSystemMonitor**: a scheme seeded from the app's violet.
+- Rice palettes: Catppuccin, Rosé Pine, Gruvbox, Nord, Tokyo Night, Dracula,
+  Everforest, Kanagawa, Solarized, One and a plain Default, each light and dark.
+
+Light or dark follows the desktop unless set in the same dialog, which also has
+Reduce Motion, Performance Mode and No Shapes. To make your own theme, put a TOML
+file in `~/.config/plusysmon/themes/` (the "Open Themes Folder" button creates
+it), either a seed colour:
 
 ```toml
 # ~/.config/plusysmon/themes/neon.toml
 name = "Neon"
-extends = "aurora"      # optional, Aurora is the default base
-
-[colors]
-primary = "#ff2d55"     # buttons, focus, selection
-
-[accents]
-cpu = "#22c55e"         # #rgb, #rrggbb or #rrggbbaa
+seed = "#ff2d55"
+variant = "vibrant"   # tonal_spot (default), content, fidelity, expressive, …
 ```
 
-Every key is listed, with comments, in `crates/frontend/themes/aurora.toml`.
-Edits to the active theme apply live; mistakes (unknown keys, bad colours) show
-up as an error in the app and in the theme list.
+or the 13 colours of a rice palette, for `[dark]`, `[light]` or both (one is
+used for both modes when the other is missing):
+
+```toml
+[dark]
+lowest = "#11111b"    # the deepest ground
+window = "#181825"
+page = "#1e1e2e"
+raised = "#313244"
+raised_more = "#45475a"
+line = "#585b70"
+text = "#cdd6f4"
+subtext = "#a6adc8"
+muted = "#7f849c"
+primary = "#cba6f7"
+secondary = "#f5c2e7"
+tertiary = "#94e2d5"
+error = "#f38ba8"
+```
+
+The colours the data is drawn in (CPU, memory, GPU, …) keep their own hues and
+are pulled toward each theme's primary. Edits to the active theme apply live;
+mistakes show up as an error in the app and in the theme list.
 
 ## Layout
 
-"Edit layout" lets you drag widgets around a 12-column grid, resize them from the
+"Edit Layout" lets you drag widgets around a 12-column grid, resize them from the
 corner handle, change their options and add or remove them. The result is saved
 to `~/.config/plusysmon/layout.toml`. A layout file that can't be read is moved
 to `layout.toml.broken` and the default layout is used.
@@ -192,5 +249,7 @@ current machine's processes are grouped.
 - `plusysmon --screenshot out.png` renders the window, saves it after 5 s and quits.
 - With stderr redirected, Qt logs to the journal instead; set
   `QT_FORCE_STDERR_LOGGING=1` to see QML warnings in the terminal.
-- Design tokens are declared in `crates/frontend/qml/Theme.qml` and filled from
-  the theme files.
+- Design tokens are in `crates/frontend/qml/design/Appearance.qml`; the colour
+  scheme is built by `design/Scheme.js` from the roles `src/theme.rs` computes.
+  Components after Swiftify's are in `qml/components`, the window's shell in
+  `qml/shell`, and shaders (baked with Qt's `qsb` at build time) in `qml/shaders`.

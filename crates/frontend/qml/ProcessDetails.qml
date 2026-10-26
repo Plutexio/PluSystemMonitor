@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Layouts
 import PluSystemMonitor
 
-// Everything about the selected process, plus the actions on it.
+// The inspector for the picked process: everything about it, and the
+// signals to send it.
 Rectangle {
     id: root
 
@@ -25,9 +26,8 @@ Rectangle {
 
     onPidChanged: reload()
 
-    radius: Theme.radius
-    color: Theme.card
-    border.color: Theme.cardBorder
+    radius: Appearance.rounding.large
+    color: Appearance.colors.layer1
     clip: true
 
     Connections {
@@ -50,67 +50,76 @@ Rectangle {
     component Stat: Column {
         property string label
         property string value
-        property color valueColor: Theme.text
+        property color valueColor: Appearance.colors.onSurface
 
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        spacing: 3
+        spacing: 2
 
-        Text {
-            text: parent.label.toUpperCase()
-            color: Theme.textDim
-            font.pixelSize: 10
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.2
+        StyledText {
+            text: parent.label
+            color: Appearance.colors.onSurfaceVariant
+            font.pixelSize: Appearance.fontSize.smaller
         }
-        Text {
+        StyledText {
             width: parent.width
             text: parent.value
             color: parent.valueColor
-            font.pixelSize: 15
             font.weight: Font.DemiBold
-            font.features: { "tnum": 1 }
+            tabularNumbers: true
             elide: Text.ElideRight
         }
     }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Theme.padding
-        spacing: 18
+        anchors.margins: 20
+        spacing: 16
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 12
+
+            ShapeIcon {
+                Layout.alignment: Qt.AlignTop
+                size: 40
+                iconSize: 21
+                shape: root.info ? (root.paused ? "pentagon" : "cookie9") : "ghostish"
+                symbol: root.info ? (root.info.kernel_thread ? "settings" : "terminal") : "close"
+                hovered: headerHover.hovered
+
+                HoverHandler {
+                    id: headerHover
+                }
+            }
 
             Column {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                spacing: 4
+                spacing: 2
 
-                Text {
+                TitleText {
                     width: parent.width
-                    text: root.info ? root.info.name : "Process ended"
-                    color: Theme.text
-                    font.pixelSize: 20
-                    font.weight: Font.Bold
+                    text: root.info ? root.info.name : "Process Ended"
+                    font.pixelSize: Appearance.fontSize.larger
                     elide: Text.ElideRight
                 }
-                Text {
+                StyledText {
                     width: parent.width
                     text: root.info ? "PID " + root.info.pid + " · " + root.info.user
-                                    : "PID " + root.pid + " is no longer running."
-                    color: Theme.textDim
-                    font.pixelSize: 12
+                                    : "PID " + root.pid + " isn't running anymore."
+                    color: Appearance.colors.onSurfaceVariant
+                    font.pixelSize: Appearance.fontSize.smaller
                     elide: Text.ElideRight
                 }
             }
 
-            GlassButton {
+            IconButton {
                 Layout.alignment: Qt.AlignTop
-                implicitHeight: 32
-                iconName: "close"
-                tip: "Close (Esc)"
+                symbol: "close"
+                size: 36
+                iconSize: 20
+                tooltip: "Close (Esc)"
                 onClicked: root.closeRequested()
             }
         }
@@ -120,49 +129,49 @@ Rectangle {
             visible: root.stats !== null
             columns: 2
             columnSpacing: 16
-            rowSpacing: 14
+            rowSpacing: 12
 
             Stat {
                 label: "CPU"
                 value: root.stats ? root.stats.cpu.toFixed(1) + "%" : ""
-                valueColor: Theme.cpu
+                valueColor: Appearance.colors.cpu
             }
             Stat {
                 label: "Memory"
                 value: root.stats ? Format.bytes(root.stats.memory) : ""
-                valueColor: Theme.memory
+                valueColor: Appearance.colors.memory
             }
             Stat {
                 visible: root.stats !== null && root.stats.gpu !== null
                 label: "GPU"
                 value: root.stats && root.stats.gpu !== null ? root.stats.gpu.toFixed(0) + "%" : ""
-                valueColor: Theme.gpu
+                valueColor: Appearance.colors.gpu
             }
             Stat {
                 visible: root.stats !== null && root.stats.gpu_memory !== null
-                label: "GPU memory"
+                label: "GPU Memory"
                 value: root.stats && root.stats.gpu_memory !== null ? Format.bytes(root.stats.gpu_memory) : ""
-                valueColor: Theme.gpu
+                valueColor: Appearance.colors.gpu
             }
             Stat {
-                label: "Disk read"
+                label: "Disk Read"
                 value: root.stats ? (root.stats.read_rate === null ? "Not permitted" : Format.rate(root.stats.read_rate) || "0 B/s") : ""
             }
             Stat {
-                label: "Disk write"
+                label: "Disk Write"
                 value: root.stats ? (root.stats.write_rate === null ? "Not permitted" : Format.rate(root.stats.write_rate) || "0 B/s") : ""
             }
             Stat {
                 label: "State"
                 value: root.stats ? Format.processState(root.stats.state) : ""
-                valueColor: root.paused ? Theme.warn : Theme.text
+                valueColor: root.paused ? Appearance.colors.warn : Appearance.colors.onSurface
             }
             Stat {
                 label: "Threads"
                 value: root.stats ? root.stats.threads : ""
             }
             Stat {
-                label: "Running for"
+                label: "Running For"
                 value: root.info ? Format.duration(clock.now - root.info.started_ms) : ""
             }
             Stat {
@@ -176,20 +185,17 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
             visible: root.info !== null && root.info.ppid > 0
-            spacing: 3
+            spacing: 2
 
-            Text {
-                text: "PARENT"
-                color: Theme.textDim
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
+            SectionLabel {
+                width: parent.width
+                inset: 0
+                text: "Parent"
             }
-            Text {
+            StyledText {
                 width: parent.width
                 text: root.details ? (root.details.parentName ?? "process") + " (" + root.info.ppid + ")" : ""
-                color: parentHover.hovered ? Theme.primary : Theme.text
-                font.pixelSize: 14
+                color: parentHover.hovered ? Appearance.colors.primary : Appearance.colors.onSurface
                 font.underline: parentHover.hovered
                 elide: Text.ElideRight
 
@@ -210,36 +216,34 @@ Rectangle {
             Layout.fillHeight: true
             visible: root.info !== null
 
-            Text {
+            SectionLabel {
                 id: commandLabel
-                text: "COMMAND"
-                color: Theme.textDim
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
+                width: parent.width
+                inset: 0
+                text: "Command"
             }
             Rectangle {
                 anchors.top: commandLabel.bottom
-                anchors.topMargin: 6
+                anchors.topMargin: 4
                 width: parent.width
-                height: Math.min(command.implicitHeight + 20, parent.height - commandLabel.height - 6)
-                radius: 10
-                color: Theme.track
+                height: Math.min(command.implicitHeight + 24, parent.height - commandLabel.height - 4)
+                radius: Appearance.rounding.small
+                color: Appearance.colors.layer2
                 clip: true
 
                 TextEdit {
                     id: command
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.margins: 12
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextEdit.WrapAnywhere
                     text: root.info ? (root.info.command || "[" + root.info.name + "] (kernel thread)") : ""
-                    color: Theme.text
-                    selectionColor: Theme.primary
-                    selectedTextColor: "white"
-                    font.family: "monospace"
-                    font.pixelSize: 12
+                    color: Appearance.colors.onSurface
+                    selectionColor: Appearance.colors.primary
+                    selectedTextColor: Appearance.colors.onPrimary
+                    font.family: Appearance.monoFontFamily
+                    font.pixelSize: Appearance.fontSize.smaller
                 }
             }
         }
@@ -249,31 +253,38 @@ Rectangle {
             visible: root.info !== null && !root.info.kernel_thread
             spacing: 8
 
-            GlassButton {
+            TextButton {
                 Layout.fillWidth: true
-                iconName: root.paused ? "play" : "pause"
+                Layout.preferredWidth: 1
+                variant: TextButton.Tonal
                 text: root.paused ? "Resume" : "Pause"
+                leftPadding: 12
+                rightPadding: 12
                 onClicked: root.monitor.sendSignal(root.pid, root.paused ? "continue" : "stop")
             }
-            GlassButton {
+            TextButton {
                 Layout.fillWidth: true
-                iconName: "power"
+                Layout.preferredWidth: 1
+                variant: TextButton.Tonal
                 text: "End"
-                tip: "Ask the process to exit (SIGTERM). Shortcut: Delete"
+                leftPadding: 12
+                rightPadding: 12
+                tooltip: "Asks it to exit (SIGTERM). Shortcut: Delete."
                 onClicked: root.monitor.sendSignal(root.pid, "terminate")
             }
-            GlassButton {
+            TextButton {
                 id: killButton
 
-                // Two-step: killing loses unsaved work.
+                // Two steps: killing loses unsaved work.
                 property bool armed: false
 
                 Layout.fillWidth: true
-                danger: true
-                primary: armed
-                iconName: "close"
+                Layout.preferredWidth: 1
+                variant: armed ? TextButton.Danger : TextButton.DangerTonal
                 text: armed ? "Sure?" : "Kill"
-                tip: "End immediately (SIGKILL); unsaved work is lost"
+                leftPadding: 12
+                rightPadding: 12
+                tooltip: "Ends it at once (SIGKILL); unsaved work is lost."
                 onClicked: {
                     if (armed) {
                         armed = false

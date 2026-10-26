@@ -1,33 +1,33 @@
 import QtQuick
 import PluSystemMonitor
 
-// One source as a labelled bar: "RAM   11.4 GiB / 31.2 GiB". Without a scale
-// it is just the label and the value.
+// One source as a labelled wavy bar: "RAM   11.4 GiB / 31.2 GiB". Without a
+// scale it is just the label and the value.
 Column {
     id: root
 
     /// An object from `Sources.read`.
     property var source
-    property color color: Theme.memory
+    property color color: Appearance.colors.memory
 
     readonly property bool scaled: source && source.max > 0
 
-    spacing: 7
+    spacing: 6
 
     Item {
         width: root.width
         height: valueText.height
 
-        Text {
+        StyledText {
             anchors.left: parent.left
             anchors.right: valueText.left
             anchors.rightMargin: 8
             text: root.source ? root.source.name : ""
-            color: Theme.textDim
-            font.pixelSize: 13
+            color: Appearance.colors.onSurfaceVariant
+            font.pixelSize: Appearance.fontSize.smallie
             elide: Text.ElideRight
         }
-        Text {
+        StyledText {
             id: valueText
             anchors.right: parent.right
             text: {
@@ -37,34 +37,18 @@ Column {
                 // "used / total" reads well for amounts, not for rates or temperatures.
                 return s.unit === "bytes" && s.max > 0 ? s.text + " / " + Format.metric(s.max, s.unit) : s.text
             }
-            color: Theme.text
-            font.pixelSize: 13
+            font.pixelSize: Appearance.fontSize.smallie
             font.weight: Font.DemiBold
-            font.features: { "tnum": 1 }
+            tabularNumbers: true
         }
     }
 
-    Rectangle {
+    WavyProgress {
         visible: root.scaled
         width: root.width
-        height: 8
-        radius: 4
-        color: Theme.track
-
-        Rectangle {
-            width: Math.max(height, parent.width * (root.source ? root.source.fraction : 0))
-            height: parent.height
-            radius: parent.radius
-            visible: root.source && root.source.fraction > 0
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: Qt.darker(root.color, 1.4) }
-                GradientStop { position: 1.0; color: root.color }
-            }
-
-            Behavior on width {
-                NumberAnimation { duration: 650; easing.type: Easing.OutCubic }
-            }
-        }
+        value: root.source ? root.source.fraction : 0
+        color: root.color
+        trackColor: Appearance.colors.tonal(root.color)
+        thickness: 5
     }
 }

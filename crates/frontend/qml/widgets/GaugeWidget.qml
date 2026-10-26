@@ -17,20 +17,22 @@ Card {
     readonly property var details: sources.slice(1)
 
     // Bars that fit below the header while leaving the ring ~90 px.
-    readonly property int shownDetails: Math.min(details.length, Math.max(0, Math.floor((height - 176) / 44)))
+    readonly property int shownDetails: Math.min(details.length, Math.max(0, Math.floor((height - 186) / 46)))
 
     title: options.title || (main ? main.name : "Gauge")
-    accent: colors[0] ?? Theme.cpu
+    accent: colors[0] ?? Appearance.colors.cpu
+    symbol: Sources.look(main).symbol
+    shape: Sources.look(main).shape
 
-    Text {
+    StyledText {
         anchors.centerIn: parent
         width: parent.width
         visible: !root.main || !root.main.available
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         text: Sources.absence(root.main, root.monitor)
-        color: Theme.textDim
-        font.pixelSize: 13
+        color: Appearance.colors.onSurfaceVariant
+        font.pixelSize: Appearance.fontSize.smallie
     }
 
     RingGauge {

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import QtQuick.Shapes
 import PluSystemMonitor
 
@@ -12,7 +11,7 @@ Item {
     property int maxPoints: 120
     property real maxValue: 100
     property int interval: 1000
-    property color color: Theme.cpu
+    property color color: Appearance.colors.cpu
     /// Off for series overlaid on another graph, so the grid isn't drawn twice.
     property bool showGrid: true
     property real fillOpacity: 1
@@ -51,7 +50,7 @@ Item {
             width: root.width
             height: 1
             y: root.height - root.height * 0.92 * (index + 1) / 3
-            color: Theme.grid
+            color: Qt.alpha(Appearance.colors.outlineVariant, 0.6)
         }
     }
 
@@ -65,7 +64,8 @@ Item {
             id: slide
             from: root.step
             to: 0
-            duration: root.interval
+            // With no animations the curve steps instead of gliding.
+            duration: Appearance.motion(root.interval)
         }
 
         Shape {
@@ -77,7 +77,7 @@ Item {
                 fillGradient: LinearGradient {
                     y1: 0
                     y2: root.height
-                    GradientStop { position: 0.0; color: Qt.alpha(root.color, 0.38 * root.fillOpacity) }
+                    GradientStop { position: 0.0; color: Qt.alpha(root.color, 0.32 * root.fillOpacity) }
                     GradientStop { position: 1.0; color: Qt.alpha(root.color, 0.0) }
                 }
                 PathPolyline { path: root.fillPoints }
@@ -85,7 +85,7 @@ Item {
 
             ShapePath {
                 strokeColor: root.color
-                strokeWidth: 2
+                strokeWidth: 2.5
                 fillColor: "transparent"
                 joinStyle: ShapePath.RoundJoin
                 capStyle: ShapePath.RoundCap
@@ -93,27 +93,27 @@ Item {
             }
         }
 
-        // Glowing head on the newest point.
+        // The newest point: a dot in a soft halo of its own colour.
         Rectangle {
             visible: root.values.length > 0
-            width: 9
-            height: 9
-            radius: 4.5
+            width: 16
+            height: 16
+            radius: 8
             x: root.width - width / 2
             y: (root.linePoints.length ? root.linePoints[root.linePoints.length - 1].y : root.height) - height / 2
-            color: root.color
-            layer.enabled: Theme.glow > 0
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: root.color
-                shadowBlur: 1.0
-                shadowOpacity: Theme.glow
-                shadowHorizontalOffset: 0
-                shadowVerticalOffset: 0
-            }
+            color: Qt.alpha(root.color, 0.28)
 
             Behavior on y {
+                enabled: !Appearance.performanceMode
                 NumberAnimation { duration: root.interval / 2; easing.type: Easing.OutCubic }
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 8
+                height: 8
+                radius: 4
+                color: root.color
             }
         }
     }

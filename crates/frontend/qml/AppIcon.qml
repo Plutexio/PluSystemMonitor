@@ -1,7 +1,8 @@
 import QtQuick
 import PluSystemMonitor
 
-// An app's icon, or its initial on a tinted tile while the icon is missing or loading.
+// An app's icon, or its initial set round on a tonal cookie while the icon is
+// missing or loading.
 Item {
     id: root
 
@@ -12,18 +13,17 @@ Item {
     implicitWidth: size
     implicitHeight: size
 
-    Rectangle {
+    MaterialShape {
         anchors.fill: parent
         visible: icon.status !== Image.Ready
-        radius: width * 0.28
-        color: Qt.alpha(Theme.primary, 0.2)
+        shape: "cookie9"
+        color: Appearance.colors.primaryContainer
 
-        Text {
+        TitleText {
             anchors.centerIn: parent
             text: root.name.length > 0 ? root.name[0].toUpperCase() : "?"
-            color: Theme.primary
-            font.pixelSize: root.size * 0.45
-            font.weight: Font.Bold
+            color: Appearance.colors.onPrimaryContainer
+            font.pixelSize: root.size * 0.42
         }
     }
 

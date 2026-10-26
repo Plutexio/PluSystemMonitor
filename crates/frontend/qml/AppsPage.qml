@@ -1,8 +1,10 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// Running applications, each a card with its processes rolled up.
+// Running applications, each a card with its processes rolled up. The one
+// picked opens in the inspector.
 Item {
     id: root
 
@@ -12,7 +14,6 @@ Item {
     property string selectedId: ""
 
     signal settingsEdited(var settings)
-    signal processRequested(int pid)
 
     readonly property var sortKeys: ["name", "cpu", "memory", "gpu"]
 
@@ -32,120 +33,89 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: Theme.spacing
+        anchors.leftMargin: Appearance.sizes.pageMargin
+        anchors.rightMargin: Appearance.sizes.pageMargin
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: 12
 
-            GlassField {
+            SearchField {
                 id: search
-
-                Layout.preferredWidth: 320
-                leftPadding: 40
-                placeholderText: "Search apps"
-                Keys.onEscapePressed: text = ""
-
-                Icon {
-                    x: 13
-                    anchors.verticalCenter: parent.verticalCenter
-                    name: "search"
-                    color: Theme.textDim
-                    size: 16
-                }
+                Layout.preferredWidth: 300
+                placeholder: qsTr("Search apps")
             }
 
-            Segmented {
-                model: ["Name", "CPU", "Memory", "GPU"]
+            SegmentedControl {
                 currentIndex: Math.max(0, root.sortKeys.indexOf(apps.sortKey))
-                onActivated: index => {
-                    root.settings = Object.assign({}, root.settings, { sort: root.sortKeys[index] })
-                    root.settingsEdited(root.settings)
-                }
+                segments: [
+                    Segment { text: qsTr("Name"); symbol: "sort_by_alpha" },
+                    Segment { text: qsTr("CPU"); symbol: "memory" },
+                    Segment { text: qsTr("Memory"); symbol: "memory_alt" },
+                    Segment { text: qsTr("GPU"); symbol: "developer_board" }
+                ]
+                onActivated: index => root.settingsEdited(Object.assign({}, root.settings, { sort: root.sortKeys[index] }))
             }
 
             Item {
                 Layout.fillWidth: true
             }
 
-            Text {
+            StyledText {
                 text: apps.count + (apps.count === 1 ? " app" : " apps") + " · "
                       + apps.backgroundCount + " background processes"
-                color: Theme.textDim
-                font.pixelSize: 13
-                font.features: { "tnum": 1 }
+                color: Appearance.colors.onSurfaceVariant
+                font.pixelSize: Appearance.fontSize.smallie
+                tabularNumbers: true
+                elide: Text.ElideRight
+                Layout.maximumWidth: 280
             }
         }
 
-        RowLayout {
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Theme.spacing
 
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+            GridView {
+                id: grid
 
-                GridView {
-                    id: grid
+                readonly property int columns: Math.max(1, Math.floor(width / 290))
 
-                    readonly property int columns: Math.max(1, Math.floor(width / 290))
+                // Bleed half a gap out so card edges line up with the toolbar.
+                anchors.fill: parent
+                anchors.leftMargin: -Appearance.sizes.shelfGap / 2
+                anchors.rightMargin: -Appearance.sizes.shelfGap / 2
+                cellWidth: width / columns
+                cellHeight: 210
+                clip: true
+                model: apps
+                boundsBehavior: Flickable.StopAtBounds
+                bottomMargin: Appearance.sizes.shelfGap
 
-                    // Bleed half a gap out so card edges line up with the toolbar.
-                    anchors.fill: parent
-                    anchors.margins: -Theme.spacing / 2
-                    cellWidth: width / columns
-                    cellHeight: 210
-                    clip: true
-                    model: apps
-                    boundsBehavior: Flickable.StopAtBounds
+                T.ScrollBar.vertical: StyledScrollBar {}
 
-                    delegate: AppCard {
-                        width: grid.cellWidth
-                        height: grid.cellHeight
-                        interval: root.monitor.intervalMs
-                        selected: appId === root.selectedId
-                        onClicked: root.selectedId = selected ? "" : appId
-                    }
-                }
-
-                Text {
-                    anchors.centerIn: parent
-                    visible: apps.count === 0
-                    text: search.text ? "No app matches “" + search.text + "”" : "Waiting for data…"
-                    color: Theme.textDim
-                    font.pixelSize: 14
+                delegate: AppCard {
+                    width: grid.cellWidth
+                    height: grid.cellHeight
+                    interval: root.monitor.intervalMs
+                    selected: appId === root.selectedId
+                    onClicked: root.selectedId = selected ? "" : appId
                 }
             }
 
-            // Same reveal-by-wrapper trick as on the Processes page.
-            Item {
-                readonly property bool shown: root.selectedId !== ""
+            LoadingState {
+                anchors.centerIn: parent
+                visible: apps.count === 0 && !search.text && (!root.monitor.connected || root.monitor.processCount === 0)
+            }
 
-                Layout.fillHeight: true
-                Layout.preferredWidth: shown ? details.width : 0
-                visible: Layout.preferredWidth > 1
-                clip: true
-
-                Behavior on Layout.preferredWidth {
-                    NumberAnimation { duration: 260; easing.type: Easing.OutCubic }
-                }
-
-                AppDetails {
-                    id: details
-
-                    width: 340
-                    height: parent.height
-                    opacity: parent.shown ? 1 : 0
-                    monitor: root.monitor
-                    appId: root.selectedId
-                    onCloseRequested: root.selectedId = ""
-                    onProcessRequested: pid => root.processRequested(pid)
-
-                    Behavior on opacity {
-                        NumberAnimation { duration: 200 }
-                    }
-                }
+            EmptyState {
+                anchors.centerIn: parent
+                visible: apps.count === 0 && (search.text.length > 0 || (root.monitor.connected && root.monitor.processCount > 0))
+                symbol: search.text ? "search_off" : "apps"
+                title: search.text ? qsTr("Nothing Matches") : qsTr("No Apps Open")
+                description: search.text ? qsTr("No app matches “%1”. Check the spelling or try a new search.").arg(search.text)
+                                          : qsTr("Only background processes are running. They're on the Processes page.")
             }
         }
     }

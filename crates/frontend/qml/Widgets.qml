@@ -5,7 +5,7 @@ import QtQuick
 // that takes `monitor` and `options`. Its options are described here, so the
 // settings form is generated and new widgets need no other wiring.
 //
-// Option types: "bool", "text", "accent" (one of Theme.accentKeys, or "auto"
+// Option types: "bool", "text", "accent" (one of Sources.accentKeys, or "auto"
 // to follow the data source), "sources" (data source IDs, `min`..`max` of them).
 QtObject {
     readonly property var types: [
@@ -34,8 +34,8 @@ QtObject {
                 { key: "sources", label: "Sources", type: "sources", default: ["cpu.total"], min: 1, max: 4,
                   hint: "Each line is scaled to its own range." },
                 { key: "title", label: "Title", type: "text", default: "", placeholder: "Name of the first source" },
-                { key: "fit", label: "Fit lines to their data", type: "bool", default: false },
-                { key: "accent", label: "Colour of the first line", type: "accent", default: "auto" }
+                { key: "fit", label: "Fit Lines to Their Data", type: "bool", default: false },
+                { key: "accent", label: "Colour of the First Line", type: "accent", default: "auto" }
             ]
         },
         {
@@ -53,7 +53,7 @@ QtObject {
         },
         {
             type: "cpu.cores",
-            name: "CPU cores",
+            name: "CPU Cores",
             description: "Load of every logical core.",
             source: Qt.resolvedUrl("widgets/CpuCoresWidget.qml"),
             size: [6, 2],

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PluSystemMonitor
+GenericName=System Monitor
+Comment=Monitor CPU, memory, GPU, sensors, processes and apps on this or another machine
+Exec=@BINDIR@/plusysmon
+Icon=plusysmon
+Terminal=false
+Categories=System;Monitor;Qt;
+Keywords=system;monitor;task;manager;process;cpu;gpu;memory;sensors;
+StartupNotify=true
+StartupWMClass=plusysmon

@@ -3,13 +3,24 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::theme::DEFAULT_THEME;
+use crate::theme::DEFAULT_SOURCE;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    /// A theme ID: "system" for the desktop's Matugen scheme, a built-in, or a
+    /// file in the themes folder.
     pub theme: String,
-    /// The page shown last (0 overview, 1 processes), restored on start.
+    /// auto (as the desktop prefers), light or dark.
+    pub theme_mode: String,
+    /// Stills what moves on its own, over and over.
+    pub reduce_motion: bool,
+    /// No animations at all, not even fades.
+    pub performance_mode: bool,
+    /// No decorative shapes; the ones that mean something stay.
+    pub no_shapes: bool,
+    pub sidebar_width: f64,
+    /// The page shown last (0 overview, 1 apps, 2 processes), restored on start.
     pub page: u8,
     pub connection: Connection,
     pub apps: AppView,
@@ -53,7 +64,12 @@ pub struct ProcessView {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            theme: DEFAULT_THEME.to_owned(),
+            theme: DEFAULT_SOURCE.to_owned(),
+            theme_mode: "auto".to_owned(),
+            reduce_motion: false,
+            performance_mode: false,
+            no_shapes: false,
+            sidebar_width: 232.0,
             page: 0,
             connection: Connection::default(),
             apps: AppView::default(),

@@ -1,0 +1,102 @@
+import QtQuick
+import PluSystemMonitor
+
+// A Material 3 search bar: a full pill with a leading magnifier, and a clear
+// button once there is something to clear. Esc clears it, then lets go.
+Rectangle {
+    id: root
+
+    property alias text: input.text
+    readonly property bool editing: input.activeFocus
+    property string placeholder: qsTr("Search")
+    signal accepted()
+
+    function focusField() {
+        input.forceActiveFocus()
+        input.selectAll()
+    }
+
+    implicitWidth: 260
+    implicitHeight: 40
+    radius: height / 2
+    color: input.activeFocus ? Qt.alpha(Appearance.colors.surfaceContainerHighest, 0.5)
+                             : Appearance.colors.surfaceContainerHigh
+    border.width: input.activeFocus ? 2 : 0
+    border.color: Appearance.colors.primary
+
+    Behavior on color {
+        ElementMoveFastColor {}
+    }
+
+    TapHandler {
+        onTapped: if (!root.editing) root.focusField()
+    }
+    HoverHandler {
+        cursorShape: Qt.IBeamCursor
+    }
+
+    MaterialSymbol {
+        id: icon
+        anchors.left: parent.left
+        anchors.leftMargin: 12
+        anchors.verticalCenter: parent.verticalCenter
+        text: "search"
+        iconSize: 20
+        color: Appearance.colors.onSurfaceVariant
+    }
+
+    TextInput {
+        id: input
+        x: icon.x + icon.width + 10
+        width: Math.max(0, (clear.visible ? clear.x : root.width) - 12 - x)
+        anchors.verticalCenter: parent.verticalCenter
+        clip: true
+        selectByMouse: true
+        color: Appearance.colors.onSurface
+        selectionColor: Appearance.colors.primary
+        selectedTextColor: Appearance.colors.onPrimary
+        font.family: Appearance.fontFamily
+        font.pixelSize: Appearance.fontSize.small
+        onAccepted: root.accepted()
+        Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
+        Keys.onEscapePressed: {
+            if (text.length > 0)
+                text = ""
+            else
+                focus = false
+        }
+
+        StyledText {
+            id: placeholderText
+            width: input.width
+            elide: Text.ElideRight
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.placeholder
+            color: Appearance.colors.onSurfaceVariant
+            font.pixelSize: Appearance.fontSize.small
+        }
+        Reveal {
+            target: placeholderText
+            shown: input.text.length === 0
+        }
+    }
+
+    IconButton {
+        id: clear
+        anchors.right: parent.right
+        anchors.rightMargin: 4
+        anchors.verticalCenter: parent.verticalCenter
+        symbol: "close"
+        size: 32
+        iconSize: 18
+        tooltip: qsTr("Clear")
+        onClicked: {
+            input.text = ""
+            input.forceActiveFocus()
+        }
+    }
+    Reveal {
+        target: clear
+        shown: input.text.length > 0 && root.width >= 100
+    }
+}

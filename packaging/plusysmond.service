@@ -1,0 +1,16 @@
+[Unit]
+Description=PluSystemMonitor daemon
+
+[Service]
+# Extra options, e.g. to accept connections from other machines:
+#   systemctl --user edit plusysmond
+#   [Service]
+#   Environment="PLUSYSMOND_ARGS=--listen 0.0.0.0:7878"
+Environment=PLUSYSMOND_ARGS=
+ExecStart=@BINDIR@/plusysmond $PLUSYSMOND_ARGS
+Restart=on-failure
+RestartSec=3
+Nice=5
+
+[Install]
+WantedBy=default.target

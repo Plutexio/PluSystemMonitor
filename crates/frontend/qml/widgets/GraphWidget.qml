@@ -19,7 +19,9 @@ Card {
 
     title: options.title || (main ? main.name : "Graph")
     subtitle: !legend && main && main.available ? main.text : ""
-    accent: colors[0] ?? Theme.cpu
+    accent: colors[0] ?? Appearance.colors.cpu
+    symbol: Sources.look(main).symbol
+    shape: Sources.look(main).shape
 
     Item {
         id: plot
@@ -45,7 +47,7 @@ Card {
                 values: source ? source.history : []
                 maxValue: Sources.scale(source, root.options.fit)
                 interval: root.monitor.intervalMs
-                color: root.colors[index] ?? Theme.cpu
+                color: root.colors[index] ?? Appearance.colors.cpu
                 showGrid: index === 0
                 fillOpacity: index === 0 ? 1 : 0.35
             }
@@ -76,29 +78,29 @@ Card {
                     width: 8
                     height: 8
                     radius: 4
-                    color: root.colors[parent.index] ?? Theme.cpu
+                    color: root.colors[parent.index] ?? Appearance.colors.cpu
                 }
-                Text {
+                StyledText {
                     text: parent.source ? parent.source.name : ""
-                    color: Theme.textDim
-                    font.pixelSize: 12
+                    color: Appearance.colors.onSurfaceVariant
+                    font.pixelSize: Appearance.fontSize.smaller
                 }
-                Text {
+                StyledText {
                     text: parent.source ? parent.source.text : ""
-                    color: Theme.text
-                    font.pixelSize: 12
+                    color: Appearance.colors.onSurface
+                    font.pixelSize: Appearance.fontSize.smaller
                     font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
+                    tabularNumbers: true
                 }
             }
         }
     }
 
-    Text {
+    StyledText {
         anchors.centerIn: parent
         visible: !root.main || !root.main.available
         text: Sources.absence(root.main, root.monitor)
-        color: Theme.textDim
-        font.pixelSize: 13
+        color: Appearance.colors.onSurfaceVariant
+        font.pixelSize: Appearance.fontSize.smallie
     }
 }

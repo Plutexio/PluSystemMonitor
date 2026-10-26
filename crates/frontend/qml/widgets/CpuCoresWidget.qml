@@ -7,11 +7,13 @@ Card {
     required property Monitor monitor
     property var options: ({})
 
-    readonly property color tint: Theme.accent(options.accent)
+    readonly property color tint: Appearance.colors.accent(options.accent)
 
     title: "Cores"
     subtitle: monitor.cpuCores.length > 0 ? monitor.cpuCores.length + " threads" : ""
     accent: tint
+    symbol: "memory"
+    shape: "cookie12"
 
     CoreBars {
         anchors.fill: parent

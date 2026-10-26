@@ -12,10 +12,12 @@ Card {
         monitor.revision
         return Sources.read(monitor, (options.sources ?? []).slice(0, 1))[0] ?? null
     }
-    readonly property color tint: Sources.colors(source ? [source] : [], options.accent)[0] ?? Theme.cpu
+    readonly property color tint: Sources.colors(source ? [source] : [], options.accent)[0] ?? Appearance.colors.cpu
 
     title: options.title || (source ? source.name : "Value")
     accent: tint
+    symbol: Sources.look(source).symbol
+    shape: Sources.look(source).shape
 
     LiveGraph {
         anchors.left: parent.left
@@ -32,22 +34,21 @@ Card {
         fillOpacity: 0.6
     }
 
-    Text {
+    StyledText {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         visible: !root.source || !root.source.available
         text: Sources.absence(root.source, root.monitor)
-        color: Theme.textDim
-        font.pixelSize: 12
+        color: Appearance.colors.onSurfaceVariant
+        font.pixelSize: Appearance.fontSize.smaller
     }
 
-    Text {
+    // The reading set round and big, as a title is.
+    TitleText {
         anchors.left: parent.left
         anchors.top: parent.top
         text: root.source && root.source.available ? root.source.text : "—"
-        color: Theme.text
         font.pixelSize: Math.max(22, Math.min(parent.height * 0.42, 52))
-        font.weight: Font.Bold
-        font.features: { "tnum": 1 }
+        tabularNumbers: true
     }
 }

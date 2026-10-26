@@ -72,22 +72,23 @@ Item {
 
     Behavior on x {
         enabled: frame.editing && !frame.dragging
-        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+        ElementMove {}
     }
     Behavior on y {
         enabled: frame.editing && !frame.dragging
-        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+        ElementMove {}
     }
     Behavior on width {
         enabled: frame.editing && !frame.resizing
-        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+        ElementMove {}
     }
     Behavior on height {
         enabled: frame.editing && !frame.resizing
-        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+        ElementMove {}
     }
     Behavior on scale {
-        NumberAnimation { duration: 150 }
+        enabled: !Appearance.performanceMode
+        Bounce {}
     }
 
     onValuesChanged: {
@@ -112,14 +113,15 @@ Item {
         id: unknownWidget
 
         Card {
-            title: "Unknown widget"
-            accent: Theme.warn
+            title: "Unknown Widget"
+            accent: Appearance.colors.warn
+            symbol: "question_mark"
+            shape: "ghostish"
 
-            Text {
+            StyledText {
                 width: parent.width
-                text: "“" + frame.kind + "” is not available in this version."
-                color: Theme.textDim
-                font.pixelSize: 13
+                text: "“" + frame.kind + "” isn't in this version. It stays in the layout for the one that has it."
+                color: Appearance.colors.onSurfaceVariant
                 wrapMode: Text.Wrap
             }
         }
@@ -133,38 +135,36 @@ Item {
         opacity: frame.editing ? 1 : 0
 
         Behavior on opacity {
-            NumberAnimation { duration: 180 }
+            NumberAnimation { duration: Appearance.duration(180) }
         }
 
         Rectangle {
             anchors.fill: parent
-            radius: Theme.radius
-            color: Qt.alpha(Theme.background, 0.78)
-            border.color: frame.dragging || moveArea.containsMouse ? Theme.primary : Theme.cardBorder
+            radius: Appearance.rounding.large
+            color: Qt.alpha(Appearance.colors.layer1, 0.84)
+            border.color: frame.dragging || moveArea.containsMouse ? Appearance.colors.primary : Appearance.colors.outlineVariant
             border.width: 2
 
             Behavior on border.color {
-                ColorAnimation { duration: 140 }
+                ElementMoveFastColor {}
             }
         }
 
         Column {
             anchors.centerIn: parent
-            spacing: 4
+            spacing: 2
 
-            Text {
+            TitleText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: frame.descriptor ? frame.descriptor.name : frame.kind
-                color: Theme.text
-                font.pixelSize: 15
-                font.weight: Font.Bold
+                font.pixelSize: Appearance.fontSize.larger
             }
-            Text {
+            StyledText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: frame.gw + " × " + frame.gh
-                color: Theme.textDim
-                font.pixelSize: 12
-                font.features: { "tnum": 1 }
+                color: Appearance.colors.onSurfaceVariant
+                font.pixelSize: Appearance.fontSize.smaller
+                tabularNumbers: true
             }
         }
 
@@ -200,32 +200,46 @@ Item {
             anchors.margins: 10
             spacing: 6
 
-            GlassButton {
-                implicitHeight: 32
+            IconButton {
                 visible: frame.descriptor !== null && frame.descriptor.options.length > 0
-                iconName: "tune"
-                tip: "Widget settings"
+                variant: IconButton.Tonal
+                size: 36
+                iconSize: 20
+                symbol: "tune"
+                tooltip: "Widget Settings"
                 onClicked: frame.dashboard.settingsRequested(frame.index, frame.descriptor, frame.values)
             }
-            GlassButton {
-                implicitHeight: 32
-                danger: true
-                iconName: "close"
-                tip: "Remove widget"
+            IconButton {
+                variant: IconButton.Tonal
+                size: 36
+                iconSize: 20
+                symbol: "delete"
+                colBackground: Appearance.colors.errorContainer
+                colBackgroundHover: Appearance.colors.errorContainerHover
+                colRipple: Appearance.colors.errorContainerActive
+                iconColor: Appearance.colors.onErrorContainer
+                tooltip: "Remove Widget"
                 onClicked: frame.dashboard.remove(frame.index)
             }
         }
 
+        // The corner to resize by: a turned arrow on a shape of its own.
         Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
+            anchors.margins: 6
             width: 34
             height: 34
 
-            Icon {
+            ShapeIcon {
                 anchors.centerIn: parent
-                name: "resize"
-                color: resizeArea.containsMouse || frame.resizing ? Theme.primary : Theme.textDim
+                size: 30
+                iconSize: 17
+                shape: "cookie6"
+                symbol: "south_east"
+                color: resizeArea.containsMouse || frame.resizing ? Appearance.colors.primary : Appearance.colors.secondaryContainer
+                iconColor: resizeArea.containsMouse || frame.resizing ? Appearance.colors.onPrimary : Appearance.colors.onSecondaryContainer
+                hovered: resizeArea.containsMouse || frame.resizing
             }
 
             MouseArea {

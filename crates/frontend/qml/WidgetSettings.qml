@@ -1,8 +1,10 @@
 import QtQuick
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// Settings form generated from the widget's option descriptors (see Widgets.qml).
-GlassPopup {
+// Settings generated from the widget's option descriptors (see Widgets.qml).
+// Every change applies at once.
+StyledDialog {
     id: root
 
     required property Monitor monitor
@@ -26,222 +28,265 @@ GlassPopup {
         valuesEdited(next)
     }
 
-    function sourceName(id) {
-        const source = Sources.catalog(monitor).find(s => s.id === id)
-        return source ? source.name : id + " (not available)"
+    function source(id) {
+        return Sources.catalog(monitor).find(s => s.id === id) ?? null
     }
 
-    title: descriptor ? descriptor.name : ""
-    width: 340
+    headline: descriptor ? descriptor.name : ""
+    symbol: "tune"
+    iconShape: "cookie7"
+    preferredWidth: 440
 
-    component Label: Text {
-        color: Theme.text
-        font.pixelSize: 14
-    }
+    Flickable {
+        width: parent.width
+        height: Math.min(form.implicitHeight, root.maximumHeight - 180)
+        contentHeight: form.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
 
-    contentItem: Column {
-        spacing: 18
+        T.ScrollBar.vertical: StyledScrollBar {}
 
-        Repeater {
-            model: root.descriptor ? root.descriptor.options : []
+        Column {
+            id: form
 
-            delegate: Column {
-                id: option
+            width: parent.width
+            spacing: 14
 
-                required property var modelData
-                readonly property var value: root.values[modelData.key]
+            Repeater {
+                model: root.descriptor ? root.descriptor.options : []
 
-                width: parent.width
-                spacing: 10
+                delegate: Column {
+                    id: option
 
-                // bool: label with a toggle on the right.
-                Item {
-                    visible: option.modelData.type === "bool"
-                    width: parent.width
-                    height: 26
+                    required property var modelData
+                    readonly property var value: root.values[modelData.key]
 
-                    Label {
-                        anchors.verticalCenter: parent.verticalCenter
+                    width: form.width
+                    spacing: 8
+
+                    // bool: the whole row flips the switch.
+                    RippleButton {
+                        visible: option.modelData.type === "bool"
+                        width: parent.width
+                        height: 48
+                        buttonRadius: Appearance.rounding.small
+                        colBackgroundHover: Appearance.colors.layer3Hover
+                        colRipple: Appearance.colors.layer3Active
+                        bounce: false
+                        onClicked: root.set(option.modelData.key, !option.value)
+
+                        contentItem: Item {
+                            StyledText {
+                                x: 4
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: option.modelData.label
+                            }
+                            StyledSwitch {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: option.value === true
+                                onClicked: root.set(option.modelData.key, !option.value)
+                            }
+                        }
+                    }
+
+                    SectionLabel {
+                        visible: option.modelData.type === "accent" || option.modelData.type === "sources"
+                        width: parent.width
+                        inset: 0
                         text: option.modelData.label
                     }
-                    Toggle {
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        checked: option.value === true
-                        onToggled: root.set(option.modelData.key, !option.value)
+
+                    // text: a free-form field; empty means the default.
+                    StyledTextField {
+                        visible: option.modelData.type === "text"
+                        width: parent.width
+                        label: option.modelData.label
+                        text: option.modelData.type === "text" ? (option.value ?? "") : ""
+                        placeholderText: option.modelData.placeholder ?? ""
+                        onTextEdited: root.set(option.modelData.key, text)
                     }
-                }
 
-                Label {
-                    visible: option.modelData.type !== "bool"
-                    text: option.modelData.label
-                }
+                    // accent: "auto" and the data colours, the chosen one a
+                    // cookie with a tick.
+                    Flow {
+                        visible: option.modelData.type === "accent"
+                        width: parent.width
+                        spacing: 8
 
-                // text: a free-form field; empty means the default.
-                GlassField {
-                    visible: option.modelData.type === "text"
-                    width: parent.width
-                    text: option.modelData.type === "text" ? (option.value ?? "") : ""
-                    placeholderText: option.modelData.placeholder ?? ""
-                    onTextEdited: root.set(option.modelData.key, text)
-                }
+                        Repeater {
+                            // Only widgets showing data sources can follow them.
+                            model: option.modelData.default === "auto" ? ["auto"].concat(Sources.accentKeys) : Sources.accentKeys
 
-                // accent: "auto" plus a row of colour dots.
-                Row {
-                    visible: option.modelData.type === "accent"
-                    spacing: 10
+                            delegate: RippleButton {
+                                id: dot
 
-                    Repeater {
-                        // Only widgets showing data sources can follow them.
-                        model: option.modelData.default === "auto" ? ["auto"].concat(Theme.accentKeys) : Theme.accentKeys
+                                required property string modelData
+                                readonly property bool chosen: option.value === modelData
+                                readonly property bool automatic: modelData === "auto"
 
-                        delegate: Rectangle {
-                            id: dot
+                                width: 44
+                                height: 44
+                                padding: 0
+                                colBackgroundHover: "transparent"
+                                rippleEnabled: false
+                                tooltip: automatic ? "Follow the Source" : modelData.charAt(0).toUpperCase() + modelData.slice(1)
+                                onClicked: root.set(option.modelData.key, modelData)
 
-                            required property string modelData
-                            readonly property bool chosen: option.value === modelData
+                                contentItem: ShapeIcon {
+                                    size: 44
+                                    iconSize: 20
+                                    shape: dot.chosen ? "cookie9" : "circle"
+                                    keepsShape: true
+                                    symbol: dot.automatic ? "auto_awesome" : (dot.chosen ? "check" : "")
+                                    color: dot.automatic ? Appearance.colors.secondaryContainer : Appearance.colors.accent(dot.modelData)
+                                    iconColor: dot.automatic ? Appearance.colors.onSecondaryContainer : Appearance.colors.surfaceContainerHigh
+                                    hovered: dot.hovered
+                                    scale: dot.chosen ? 1 : 0.8
 
-                            width: 28
-                            height: 28
-                            radius: 14
-                            color: "transparent"
-                            border.color: chosen ? Theme.text : "transparent"
-                            border.width: 2
-
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: dot.chosen ? 18 : 22
-                                height: width
-                                radius: width / 2
-                                color: dot.modelData === "auto" ? "transparent" : Theme.accent(dot.modelData)
-                                border.color: Theme.textDim
-                                border.width: dot.modelData === "auto" ? 2 : 0
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    visible: dot.modelData === "auto"
-                                    text: "A"
-                                    color: Theme.textDim
-                                    font.pixelSize: 11
-                                    font.weight: Font.Bold
-                                }
-
-                                Behavior on width {
-                                    NumberAnimation { duration: 140 }
-                                }
-                            }
-
-                            TapHandler {
-                                onTapped: root.set(option.modelData.key, dot.modelData)
-                            }
-                            HoverHandler {
-                                cursorShape: Qt.PointingHandCursor
-                            }
-                        }
-                    }
-                }
-
-                // sources: the chosen IDs in order, reorderable and removable.
-                Column {
-                    id: sourceList
-
-                    readonly property var list: option.modelData.type === "sources" ? (option.value ?? []) : []
-                    readonly property int min: option.modelData.min ?? 0
-                    readonly property int max: option.modelData.max ?? 8
-
-                    visible: option.modelData.type === "sources"
-                    width: parent.width
-                    spacing: 6
-
-                    Repeater {
-                        model: sourceList.list
-
-                        delegate: Rectangle {
-                            id: sourceRow
-
-                            required property int index
-                            required property string modelData
-
-                            width: sourceList.width
-                            height: 38
-                            radius: 10
-                            color: Theme.track
-
-                            Text {
-                                x: 12
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - buttons.width - 24
-                                text: root.sourceName(sourceRow.modelData)
-                                color: Theme.text
-                                font.pixelSize: 13
-                                elide: Text.ElideRight
-                            }
-
-                            Row {
-                                id: buttons
-
-                                anchors.right: parent.right
-                                anchors.rightMargin: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 2
-
-                                GlassButton {
-                                    implicitHeight: 30
-                                    visible: sourceRow.index > 0
-                                    iconName: "chevronUp"
-                                    tip: "Move up"
-                                    onClicked: {
-                                        const next = sourceList.list.slice()
-                                        next.splice(sourceRow.index - 1, 0, next.splice(sourceRow.index, 1)[0])
-                                        root.set(option.modelData.key, next)
+                                    Behavior on scale {
+                                        enabled: !Appearance.performanceMode
+                                        Bounce {}
                                     }
                                 }
-                                GlassButton {
-                                    implicitHeight: 30
-                                    visible: sourceList.list.length > sourceList.min
-                                    danger: true
-                                    iconName: "close"
-                                    tip: "Remove"
-                                    onClicked: root.set(option.modelData.key,
-                                        sourceList.list.filter((_, i) => i !== sourceRow.index))
+                            }
+                        }
+                    }
+
+                    // sources: the chosen IDs in order, reorderable and removable.
+                    Column {
+                        id: sourceList
+
+                        readonly property var list: option.modelData.type === "sources" ? (option.value ?? []) : []
+                        readonly property int min: option.modelData.min ?? 0
+                        readonly property int max: option.modelData.max ?? 8
+
+                        visible: option.modelData.type === "sources"
+                        width: parent.width
+                        spacing: 4
+
+                        Repeater {
+                            model: sourceList.list
+
+                            delegate: Rectangle {
+                                id: sourceRow
+
+                                required property int index
+                                required property string modelData
+                                readonly property var source: root.source(modelData)
+
+                                width: sourceList.width
+                                height: 48
+                                radius: Appearance.rounding.small
+                                color: Appearance.colors.layer4
+
+                                ShapeIcon {
+                                    id: badge
+                                    x: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    size: 30
+                                    iconSize: 16
+                                    shape: Sources.look(sourceRow.source ?? { id: sourceRow.modelData }).shape
+                                    symbol: Sources.look(sourceRow.source ?? { id: sourceRow.modelData }).symbol
+                                    color: Appearance.colors.tonal(Appearance.colors.accent(sourceRow.source ? sourceRow.source.accent : "cpu"))
+                                    iconColor: Appearance.colors.accent(sourceRow.source ? sourceRow.source.accent : "cpu")
+                                }
+
+                                StyledText {
+                                    anchors.left: badge.right
+                                    anchors.leftMargin: 10
+                                    anchors.right: buttons.left
+                                    anchors.rightMargin: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: sourceRow.source ? sourceRow.source.name : sourceRow.modelData + " (not available)"
+                                    color: sourceRow.source ? Appearance.colors.onSurface : Appearance.colors.onSurfaceVariant
+                                    font.pixelSize: Appearance.fontSize.smallie
+                                    elide: Text.ElideRight
+                                }
+
+                                Row {
+                                    id: buttons
+
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2
+
+                                    IconButton {
+                                        visible: sourceRow.index > 0
+                                        size: 34
+                                        iconSize: 20
+                                        symbol: "arrow_upward"
+                                        tooltip: "Move Up"
+                                        onClicked: {
+                                            const next = sourceList.list.slice()
+                                            next.splice(sourceRow.index - 1, 0, next.splice(sourceRow.index, 1)[0])
+                                            root.set(option.modelData.key, next)
+                                        }
+                                    }
+                                    IconButton {
+                                        visible: sourceList.list.length > sourceList.min
+                                        size: 34
+                                        iconSize: 20
+                                        symbol: "close"
+                                        iconColor: Appearance.colors.error
+                                        tooltip: "Remove"
+                                        onClicked: root.set(option.modelData.key,
+                                            sourceList.list.filter((_, i) => i !== sourceRow.index))
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    GlassButton {
-                        // A single-source widget swaps its source instead of adding one.
-                        readonly property bool swap: sourceList.max === 1 && sourceList.list.length === 1
+                        Item {
+                            width: 1
+                            height: 4
+                        }
 
-                        visible: swap || sourceList.list.length < sourceList.max
-                        iconName: swap ? "reset" : "plus"
-                        text: swap ? "Change source" : "Add source"
-                        onClicked: picker.open()
+                        TextButton {
+                            // A single-source widget swaps its source instead of adding one.
+                            readonly property bool swap: sourceList.max === 1 && sourceList.list.length === 1
 
-                        SourcePicker {
-                            id: picker
-                            monitor: root.monitor
-                            taken: sourceList.list
-                            onPicked: id => {
-                                // A widget about one app is best titled after it.
-                                const picked = Sources.catalog(root.monitor).find(s => s.id === id)
-                                if (picked && picked.app && "title" in root.values && !root.values.title)
-                                    root.set("title", picked.app)
-                                root.set(option.modelData.key, parent.swap ? [id] : sourceList.list.concat([id]))
+                            visible: swap || sourceList.list.length < sourceList.max
+                            variant: TextButton.Tonal
+                            symbol: swap ? "swap_horiz" : "add"
+                            text: swap ? "Change Source" : "Add Source"
+                            onClicked: picker.open()
+
+                            SourcePicker {
+                                id: picker
+                                monitor: root.monitor
+                                taken: sourceList.list
+                                onPicked: id => {
+                                    // A widget about one app is best titled after it.
+                                    const picked = Sources.catalog(root.monitor).find(s => s.id === id)
+                                    if (picked && picked.app && "title" in root.values && !root.values.title)
+                                        root.set("title", picked.app)
+                                    root.set(option.modelData.key, parent.swap ? [id] : sourceList.list.concat([id]))
+                                }
                             }
                         }
-                    }
 
-                    Text {
-                        visible: (option.modelData.hint ?? "").length > 0
-                        width: parent.width
-                        text: option.modelData.hint ?? ""
-                        color: Theme.textDim
-                        font.pixelSize: 12
-                        wrapMode: Text.Wrap
+                        StyledText {
+                            visible: (option.modelData.hint ?? "").length > 0
+                            width: parent.width
+                            topPadding: 4
+                            text: (option.modelData.hint ?? "").toLowerCase().replace(/\.$/, "")
+                            color: Appearance.colors.onSurfaceVariant
+                            font.pixelSize: Appearance.fontSize.smaller
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
             }
         }
     }
+
+    buttons: [
+        TextButton {
+            variant: TextButton.Filled
+            text: "Done"
+            onClicked: root.close()
+        }
+    ]
 }

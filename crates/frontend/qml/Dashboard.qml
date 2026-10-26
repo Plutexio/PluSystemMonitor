@@ -1,8 +1,9 @@
 import QtQuick
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// Widgets on a grid. Rows stretch so the layout fills the view when it fits,
-// and the view scrolls when it doesn't.
+// Widgets on a grid on the content sheet. Rows stretch so the layout fills the
+// view when it fits, and the view scrolls (under the top bar) when it doesn't.
 Flickable {
     id: root
 
@@ -15,10 +16,12 @@ Flickable {
     // Bumped on every change so bindings that scan the model re-evaluate.
     property int revision: 0
 
-    readonly property real gap: Theme.spacing
+    readonly property real gap: Appearance.sizes.shelfGap
     readonly property real minRowUnit: 56
-    readonly property real colUnit: (width + gap) / columns
-    readonly property real rowUnit: Math.max(minRowUnit, (height + gap) / usedRows)
+    readonly property real viewWidth: width - leftMargin - rightMargin
+    readonly property real viewHeight: height - topMargin - bottomMargin
+    readonly property real colUnit: (viewWidth + gap) / columns
+    readonly property real rowUnit: Math.max(minRowUnit, (viewHeight + gap) / usedRows)
     // Spare rows in edit mode give room to drop widgets below the layout.
     readonly property int shownRows: usedRows + (editing ? 3 : 0)
 
@@ -105,7 +108,7 @@ Flickable {
                 updateRows()
                 edited()
                 const target = cellRect(x, y, w, h)
-                contentY = Math.max(0, Math.min(target.y, contentHeight - height))
+                contentY = Math.max(-topMargin, Math.min(target.y - topMargin, contentHeight + bottomMargin - height))
                 return
             }
         }
@@ -123,15 +126,16 @@ Flickable {
         edited()
     }
 
-    contentWidth: width
-    contentHeight: Math.max(height, shownRows * rowUnit - gap)
-    clip: true
+    contentWidth: viewWidth
+    contentHeight: Math.max(viewHeight, shownRows * rowUnit - gap)
     boundsBehavior: Flickable.StopAtBounds
     interactive: contentHeight > height
 
     ListModel {
         id: widgets
     }
+
+    T.ScrollBar.vertical: StyledScrollBar {}
 
     // Outlines of the free cells in edit mode.
     Repeater {
@@ -148,35 +152,39 @@ Flickable {
             y: cell.y
             width: cell.width
             height: cell.height
-            radius: Math.min(10, Theme.radius / 2)
+            radius: Appearance.rounding.small
             color: "transparent"
-            border.color: Theme.grid
+            border.color: Qt.alpha(Appearance.colors.outlineVariant, 0.8)
             border.width: 1
         }
     }
 
+    // Where the widget being moved or resized would land.
     Rectangle {
         x: root.ghost.x
         y: root.ghost.y
         width: root.ghost.width
         height: root.ghost.height
         visible: root.ghostVisible
-        radius: Theme.radius
-        color: Qt.alpha(root.ghostValid ? Theme.good : Theme.bad, 0.12)
-        border.color: root.ghostValid ? Theme.good : Theme.bad
+        radius: Appearance.rounding.large
+        color: Qt.alpha(root.ghostValid ? Appearance.colors.primaryContainer : Appearance.colors.errorContainer, 0.55)
+        border.color: root.ghostValid ? Appearance.colors.primary : Appearance.colors.error
         border.width: 2
 
         Behavior on x {
-            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+            ElementMoveSmall {}
         }
         Behavior on y {
-            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+            ElementMoveSmall {}
         }
         Behavior on width {
-            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+            ElementMoveSmall {}
         }
         Behavior on height {
-            NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+            ElementMoveSmall {}
+        }
+        Behavior on color {
+            ElementMoveFastColor {}
         }
     }
 

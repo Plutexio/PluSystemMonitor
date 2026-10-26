@@ -1,8 +1,10 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// The process table: sortable header, one row per process, keyboard navigation.
+// The process table straight on the sheet: a sortable header, one row per
+// process with a state layer on hover and the picked one on a tonal pill,
+// and keyboard navigation.
 Item {
     id: root
 
@@ -11,6 +13,8 @@ Item {
     /// Visible columns besides the always-present name.
     property var columns: []
     property int selectedPid: -1
+    /// Nothing to show because no data has come yet.
+    property bool waiting: false
 
     signal selected(int pid)
     signal signalRequested(int pid, string signal)
@@ -21,16 +25,16 @@ Item {
         cpu: { title: "CPU", width: 92, align: Text.AlignRight, sort: "cpu" },
         memory: { title: "Memory", width: 108, align: Text.AlignRight, sort: "memory" },
         gpu: { title: "GPU", width: 84, align: Text.AlignRight, sort: "gpu" },
-        gpuMemory: { title: "GPU memory", width: 116, align: Text.AlignRight, sort: "gpuMemory" },
-        read: { title: "Disk read", width: 108, align: Text.AlignRight, sort: "read" },
-        write: { title: "Disk write", width: 108, align: Text.AlignRight, sort: "write" },
+        gpuMemory: { title: "GPU Memory", width: 116, align: Text.AlignRight, sort: "gpuMemory" },
+        read: { title: "Disk Read", width: 108, align: Text.AlignRight, sort: "read" },
+        write: { title: "Disk Write", width: 108, align: Text.AlignRight, sort: "write" },
         threads: { title: "Threads", width: 82, align: Text.AlignRight, sort: "threads" },
         state: { title: "State", width: 116, align: Text.AlignLeft, sort: "state" },
         nice: { title: "Nice", width: 64, align: Text.AlignRight, sort: "nice" }
     })
     readonly property var allColumns: ["pid", "user", "cpu", "memory", "gpu", "gpuMemory", "read", "write", "threads", "state", "nice"]
 
-    readonly property real sidePadding: 14
+    readonly property real sidePadding: 16
     readonly property real minNameWidth: 200
     readonly property real fixedWidth: columns.reduce((sum, key) => sum + columnDefs[key].width, 0)
     // When space runs short (e.g. the details panel is open) the other columns
@@ -112,21 +116,25 @@ Item {
             layoutDirection: cell.align === Text.AlignRight ? Qt.RightToLeft : Qt.LeftToRight
             spacing: 4
 
-            Text {
+            StyledText {
                 width: Math.min(implicitWidth, cell.width - 28)
-                text: cell.title.toUpperCase()
+                text: cell.title
                 elide: Text.ElideRight
-                color: cell.active ? Theme.text : Theme.textDim
-                font.pixelSize: 11
+                color: cell.active ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+                font.pixelSize: Appearance.fontSize.smaller
                 font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
+
+                Behavior on color {
+                    ElementMoveFastColor {}
+                }
             }
-            Icon {
+            MaterialSymbol {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: cell.active
-                name: root.processes.descending ? "chevronDown" : "chevronUp"
-                color: Theme.primary
-                size: 14
+                text: root.processes.descending ? "arrow_downward" : "arrow_upward"
+                color: Appearance.colors.primary
+                iconSize: 16
+                weight: 600
             }
         }
 
@@ -164,20 +172,22 @@ Item {
 
     Rectangle {
         anchors.top: header.bottom
-        width: parent.width
+        x: root.sidePadding / 2
+        width: parent.width - root.sidePadding
         height: 1
-        color: Theme.cardBorder
+        color: Appearance.colors.outlineVariant
     }
 
     ListView {
         id: list
 
         anchors.top: header.bottom
-        anchors.topMargin: 6
+        anchors.topMargin: 8
         anchors.bottom: parent.bottom
         width: parent.width
         clip: true
         model: root.processes
+        spacing: 2
         reuseItems: true
         boundsBehavior: Flickable.StopAtBounds
         focus: true
@@ -199,22 +209,7 @@ Item {
             event.accepted = true
         }
 
-        ScrollBar.vertical: ScrollBar {
-            id: scrollBar
-            width: 10
-            contentItem: Rectangle {
-                // A custom handle skips the style's "only when needed" logic.
-                visible: scrollBar.size < 1.0
-                implicitWidth: 6
-                radius: 3
-                color: Theme.textDim
-                opacity: scrollBar.active ? 0.6 : 0.25
-
-                Behavior on opacity {
-                    NumberAnimation { duration: 200 }
-                }
-            }
-        }
+        T.ScrollBar.vertical: StyledScrollBar {}
 
         delegate: Item {
             id: row
@@ -238,14 +233,17 @@ Item {
             readonly property bool selected: pid === root.selectedPid
 
             width: list.width - 12
-            height: 36
+            height: 40
 
             Rectangle {
                 anchors.fill: parent
-                anchors.leftMargin: 6
-                radius: 10
-                color: row.selected ? Qt.alpha(Theme.primary, 0.2) : hover.hovered ? Theme.card : "transparent"
-                border.color: row.selected ? Qt.alpha(Theme.primary, 0.5) : "transparent"
+                radius: Appearance.rounding.small
+                color: row.selected ? Appearance.colors.secondaryContainer
+                     : Qt.alpha(Appearance.colors.onSurface, hover.hovered ? 0.05 : 0)
+
+                Behavior on color {
+                    ElementMoveFastColor {}
+                }
             }
 
             Row {
@@ -256,26 +254,26 @@ Item {
                     width: root.nameWidth
                     height: parent.height
 
-                    Text {
+                    StyledText {
                         id: nameText
                         anchors.verticalCenter: parent.verticalCenter
                         width: Math.min(implicitWidth, parent.width - 10)
                         text: row.name
-                        color: Theme.text
-                        font.pixelSize: 13
-                        font.weight: Font.Medium
+                        color: row.selected ? Appearance.colors.onSecondaryContainer : Appearance.colors.onSurface
+                        font.pixelSize: Appearance.fontSize.smallie
+                        font.weight: row.selected ? Font.DemiBold : Font.Medium
                         elide: Text.ElideRight
                     }
-                    Text {
+                    StyledText {
                         anchors.left: nameText.right
                         anchors.leftMargin: 10
                         anchors.right: parent.right
                         anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
                         text: row.command
-                        color: Theme.textDim
-                        opacity: 0.7
-                        font.pixelSize: 12
+                        color: Appearance.colors.onSurfaceVariant
+                        opacity: 0.75
+                        font.pixelSize: Appearance.fontSize.smaller
                         elide: Text.ElideRight
                     }
                 }
@@ -299,26 +297,28 @@ Item {
                             visible: width >= 6
                             x: 8
                             anchors.verticalCenter: parent.verticalCenter
-                            height: 24
+                            height: 26
                             width: (parent.width - 12) * cell.fraction
-                            radius: Math.min(6, width / 2)
-                            color: Qt.alpha(cell.modelData === "cpu" ? Theme.cpu
-                                            : cell.modelData === "gpu" ? Theme.gpu : Theme.memory, 0.22)
+                            radius: Math.min(Appearance.rounding.verySmall, width / 2)
+                            color: Qt.alpha(cell.modelData === "cpu" ? Appearance.colors.cpu
+                                            : cell.modelData === "gpu" ? Appearance.colors.gpu : Appearance.colors.memory, 0.24)
 
                             Behavior on width {
-                                NumberAnimation { duration: 400; easing.type: Easing.OutCubic }
+                                enabled: !Appearance.performanceMode
+                                NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.expressiveEffects }
                             }
                         }
-                        Text {
+                        StyledText {
                             anchors.fill: parent
                             anchors.leftMargin: 4
                             anchors.rightMargin: 10
                             verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: cell.def.align
                             text: root.cellText(row, cell.modelData)
-                            color: text === "—" ? Theme.textDim : Theme.text
-                            font.pixelSize: 13
-                            font.features: { "tnum": 1 }
+                            color: text === "—" ? Appearance.colors.onSurfaceVariant
+                                 : row.selected ? Appearance.colors.onSecondaryContainer : Appearance.colors.onSurface
+                            font.pixelSize: Appearance.fontSize.smallie
+                            tabularNumbers: true
                             elide: Text.ElideRight
                         }
                     }
@@ -327,6 +327,7 @@ Item {
 
             HoverHandler {
                 id: hover
+                cursorShape: Qt.PointingHandCursor
             }
             TapHandler {
                 onTapped: {
@@ -337,11 +338,18 @@ Item {
         }
     }
 
-    Text {
+    LoadingState {
         anchors.centerIn: list
-        visible: list.count === 0
-        text: root.processes.filter ? "No process matches “" + root.processes.filter + "”" : "Waiting for data…"
-        color: Theme.textDim
-        font.pixelSize: 14
+        visible: list.count === 0 && root.waiting
+    }
+
+    EmptyState {
+        anchors.centerIn: list
+        visible: list.count === 0 && !root.waiting
+        symbol: "search_off"
+        title: qsTr("Nothing Matches")
+        description: root.processes.filter
+                     ? qsTr("No process matches “%1”. Check the spelling or search for something else.").arg(root.processes.filter)
+                     : qsTr("Nothing to show with these filters. Try All instead of Mine.")
     }
 }

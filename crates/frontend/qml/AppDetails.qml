@@ -1,9 +1,10 @@
 import QtQuick
-import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// The selected app: totals, its processes, and ending it as a whole.
+// The inspector for the picked app: its totals, its processes, and ending it
+// as a whole.
 Rectangle {
     id: root
 
@@ -23,9 +24,8 @@ Rectangle {
 
     onAppIdChanged: reload()
 
-    radius: Theme.radius
-    color: Theme.card
-    border.color: Theme.cardBorder
+    radius: Appearance.rounding.large
+    color: Appearance.colors.layer1
 
     Connections {
         target: root.monitor
@@ -43,7 +43,7 @@ Rectangle {
         RoundedImage {
             id: bannerArt
             anchors.fill: parent
-            radius: Theme.radius
+            radius: Appearance.rounding.large
             topOnly: true
             source: root.details ? root.details.art : ""
             opacity: 0.85
@@ -52,8 +52,8 @@ Rectangle {
             anchors.fill: parent
             visible: bannerArt.visible
             gradient: Gradient {
-                GradientStop { position: 0.4; color: Qt.alpha(Theme.background, 0.0) }
-                GradientStop { position: 1.0; color: Qt.alpha(Theme.background, 0.85) }
+                GradientStop { position: 0.4; color: Qt.alpha(Appearance.colors.layer1, 0.0) }
+                GradientStop { position: 1.0; color: Appearance.colors.layer1 }
             }
         }
         Image {
@@ -65,21 +65,40 @@ Rectangle {
             fillMode: Image.PreserveAspectFit
             mipmap: true
         }
+        // Without artwork, the icon sits on a big pale flower among stickers.
+        Stickers {
+            anchors.fill: parent
+            visible: !bannerArt.visible
+            key: root.appId
+            count: 3
+            minimumSize: 40
+            maximumSize: 110
+        }
+        MaterialShape {
+            anchors.centerIn: parent
+            visible: !bannerArt.visible
+            width: 116
+            height: 116
+            shape: root.details && root.details.game ? "puffy" : "flower"
+            color: Appearance.colors.secondaryContainer
+        }
         AppIcon {
             anchors.centerIn: parent
             visible: !bannerArt.visible
             source: root.details ? root.details.icon : ""
             name: root.details ? root.details.name : ""
-            size: 84
+            size: 72
         }
 
-        GlassButton {
+        IconButton {
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.margins: 14
-            implicitHeight: 32
-            iconName: "close"
-            tip: "Close"
+            anchors.margins: 12
+            variant: IconButton.Tonal
+            symbol: "close"
+            size: 36
+            iconSize: 20
+            tooltip: "Close"
             onClicked: root.closeRequested()
         }
     }
@@ -89,30 +108,28 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.margins: Theme.padding
-        anchors.topMargin: 8
-        spacing: 16
+        anchors.margins: 20
+        anchors.topMargin: 4
+        spacing: 14
 
         Column {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
             spacing: 4
 
-            Text {
+            TitleText {
                 width: parent.width
-                text: root.details ? root.details.name : "App closed"
-                color: Theme.text
-                font.pixelSize: 20
-                font.weight: Font.Bold
+                text: root.details ? root.details.name : "App Closed"
+                font.pixelSize: Appearance.fontSize.huge
                 elide: Text.ElideRight
             }
-            Text {
+            StyledText {
                 width: parent.width
                 text: !root.details ? "None of its processes are running anymore."
                       : (root.details.game ? "Game" : "Application") + " · "
                         + root.details.processes.length + (root.details.processes.length === 1 ? " process" : " processes")
-                color: Theme.textDim
-                font.pixelSize: 12
+                color: Appearance.colors.onSurfaceVariant
+                font.pixelSize: Appearance.fontSize.smaller
                 elide: Text.ElideRight
             }
         }
@@ -126,12 +143,12 @@ Rectangle {
 
             Repeater {
                 model: [
-                    { label: "CPU", key: "cpu", color: Theme.cpu },
-                    { label: "Memory", key: "memory", color: Theme.memory },
-                    { label: "GPU", key: "gpu", color: Theme.gpu },
-                    { label: "GPU memory", key: "gpuMemory", color: Theme.gpu },
-                    { label: "Disk read", key: "readRate", color: Theme.text },
-                    { label: "Disk write", key: "writeRate", color: Theme.text }
+                    { label: "CPU", key: "cpu", color: Appearance.colors.cpu },
+                    { label: "Memory", key: "memory", color: Appearance.colors.memory },
+                    { label: "GPU", key: "gpu", color: Appearance.colors.gpu },
+                    { label: "GPU Memory", key: "gpuMemory", color: Appearance.colors.gpu },
+                    { label: "Disk Read", key: "readRate", color: Appearance.colors.onSurface },
+                    { label: "Disk Write", key: "writeRate", color: Appearance.colors.onSurface }
                 ]
 
                 Column {
@@ -140,16 +157,14 @@ Rectangle {
                     // See ProcessDetails.Stat for why the preferred width is pinned.
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
-                    spacing: 3
+                    spacing: 2
 
-                    Text {
-                        text: modelData.label.toUpperCase()
-                        color: Theme.textDim
-                        font.pixelSize: 10
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 1.2
+                    StyledText {
+                        text: modelData.label
+                        color: Appearance.colors.onSurfaceVariant
+                        font.pixelSize: Appearance.fontSize.smaller
                     }
-                    Text {
+                    StyledText {
                         text: {
                             if (!root.details)
                                 return ""
@@ -163,21 +178,18 @@ Rectangle {
                             return Format.rate(value) || "0 B/s"
                         }
                         color: modelData.color
-                        font.pixelSize: 15
                         font.weight: Font.DemiBold
-                        font.features: { "tnum": 1 }
+                        tabularNumbers: true
                     }
                 }
             }
         }
 
-        Text {
+        SectionLabel {
+            Layout.fillWidth: true
             visible: root.details !== null
-            text: "PROCESSES"
-            color: Theme.textDim
-            font.pixelSize: 10
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.2
+            inset: 0
+            text: "Processes"
         }
 
         ListView {
@@ -191,17 +203,7 @@ Rectangle {
             boundsBehavior: Flickable.StopAtBounds
             model: root.details ? root.details.processes : []
 
-            ScrollBar.vertical: ScrollBar {
-                width: 8
-                contentItem: Rectangle {
-                    // A custom handle skips the style's "only when needed" logic.
-                    visible: parent.size < 1.0
-                    implicitWidth: 4
-                    radius: 2
-                    color: Theme.textDim
-                    opacity: 0.4
-                }
-            }
+            T.ScrollBar.vertical: StyledScrollBar {}
 
             delegate: Rectangle {
                 id: processRow
@@ -209,23 +211,26 @@ Rectangle {
                 required property var modelData
 
                 width: processList.width - 8
-                height: 30
-                radius: 8
-                color: rowHover.hovered ? Theme.track : "transparent"
+                height: 34
+                radius: Appearance.rounding.small
+                color: Qt.alpha(Appearance.colors.onSurface, rowHover.hovered ? 0.05 : 0)
 
-                Text {
+                Behavior on color {
+                    ElementMoveFastColor {}
+                }
+
+                StyledText {
                     anchors.left: parent.left
                     anchors.leftMargin: 8
                     anchors.right: rowCpu.left
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    text: processRow.modelData.name + "  <font color='" + Theme.textDim + "'>" + processRow.modelData.pid + "</font>"
+                    text: processRow.modelData.name + "  <font color='" + Appearance.colors.onSurfaceVariant + "'>" + processRow.modelData.pid + "</font>"
                     textFormat: Text.StyledText
-                    color: Theme.text
-                    font.pixelSize: 13
+                    font.pixelSize: Appearance.fontSize.smallie
                     elide: Text.ElideRight
                 }
-                Text {
+                StyledText {
                     id: rowCpu
                     anchors.right: rowMemory.left
                     anchors.rightMargin: 10
@@ -233,11 +238,11 @@ Rectangle {
                     width: 52
                     horizontalAlignment: Text.AlignRight
                     text: processRow.modelData.cpu.toFixed(1) + "%"
-                    color: Theme.textDim
-                    font.pixelSize: 12
-                    font.features: { "tnum": 1 }
+                    color: Appearance.colors.onSurfaceVariant
+                    font.pixelSize: Appearance.fontSize.smaller
+                    tabularNumbers: true
                 }
-                Text {
+                StyledText {
                     id: rowMemory
                     anchors.right: parent.right
                     anchors.rightMargin: 8
@@ -245,9 +250,9 @@ Rectangle {
                     width: 70
                     horizontalAlignment: Text.AlignRight
                     text: Format.bytes(processRow.modelData.memory)
-                    color: Theme.textDim
-                    font.pixelSize: 12
-                    font.features: { "tnum": 1 }
+                    color: Appearance.colors.onSurfaceVariant
+                    font.pixelSize: Appearance.fontSize.smaller
+                    tabularNumbers: true
                 }
 
                 HoverHandler {
@@ -257,9 +262,14 @@ Rectangle {
                 TapHandler {
                     onTapped: root.processRequested(processRow.modelData.pid)
                 }
-                ToolTip.visible: rowHover.hovered
-                ToolTip.delay: 700
-                ToolTip.text: "Show in Processes"
+                Loader {
+                    anchors.fill: parent
+                    active: rowHover.hovered
+                    sourceComponent: StyledToolTip {
+                        visible: true
+                        text: "Show in Processes"
+                    }
+                }
             }
         }
 
@@ -268,24 +278,28 @@ Rectangle {
             visible: root.details !== null
             spacing: 8
 
-            GlassButton {
+            TextButton {
                 Layout.fillWidth: true
-                iconName: "power"
-                text: "End app"
-                tip: "Ask every process of the app to exit (SIGTERM)"
+                Layout.preferredWidth: 1
+                variant: TextButton.Tonal
+                text: "End App"
+                leftPadding: 12
+                rightPadding: 12
+                tooltip: "Asks every one of its processes to exit (SIGTERM)."
                 onClicked: root.monitor.signalApp(root.appId, "terminate")
             }
-            GlassButton {
+            TextButton {
                 id: killButton
 
                 property bool armed: false
 
                 Layout.fillWidth: true
-                danger: true
-                primary: armed
-                iconName: "close"
-                text: armed ? "Sure?" : "Kill app"
-                tip: "End every process immediately (SIGKILL); unsaved work is lost"
+                Layout.preferredWidth: 1
+                variant: armed ? TextButton.Danger : TextButton.DangerTonal
+                text: armed ? "Sure?" : "Kill App"
+                leftPadding: 12
+                rightPadding: 12
+                tooltip: "Ends every process at once (SIGKILL); unsaved work is lost."
                 onClicked: {
                     if (armed) {
                         armed = false

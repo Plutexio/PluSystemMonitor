@@ -17,21 +17,26 @@ pub mod qobject {
         #[qml_singleton]
         type Config = super::ConfigRust;
 
-        /// `{ "theme": id, "connection": { "address", "token" } }`
+        /// `{ "theme": id, "theme_mode", "connection": { "address", "token" }, … }` (see `Prefs`)
         #[qinvokable]
         fn preferences(&self) -> QString;
 
         #[qinvokable]
         fn save_preferences(self: Pin<&mut Self>, json: &QString);
 
-        /// Summaries of every theme, for the picker.
+        /// Summaries of every theme, with swatches for light or dark, for the picker.
         #[qinvokable]
-        fn themes(&self) -> QString;
+        fn themes(&self, dark: bool) -> QString;
 
-        /// The resolved theme as flat `Theme.qml` properties, or an empty string
-        /// (plus `errorOccurred`) if it cannot be loaded. Starts watching its files.
+        /// The scheme of theme `id` (see `theme::Scheme::to_json`). A theme that
+        /// cannot be loaded falls back to the app's accent and reports why
+        /// through `errorOccurred`. Starts watching what the scheme came from.
         #[qinvokable]
-        fn load_theme(self: Pin<&mut Self>, id: &QString) -> QString;
+        fn scheme(self: Pin<&mut Self>, id: &QString, dark: bool) -> QString;
+
+        /// `file://` URL of a bundled font, or empty when it isn't installed.
+        #[qinvokable]
+        fn font_file(&self, name: &QString) -> QString;
 
         /// `file://` URL of the user themes folder, created if missing.
         #[qinvokable]
@@ -49,9 +54,9 @@ pub mod qobject {
         #[qsignal]
         fn error_occurred(self: Pin<&mut Self>, message: &QString);
 
-        /// A file of the current theme changed on disk.
+        /// A file or folder the current scheme came from changed on disk.
         #[qsignal]
-        fn theme_file_changed(self: Pin<&mut Self>);
+        fn scheme_files_changed(self: Pin<&mut Self>);
     }
 
     impl cxx_qt::Threading for Config {}
@@ -105,32 +110,38 @@ impl qobject::Config {
         self.report(result);
     }
 
-    pub fn themes(&self) -> QString {
+    pub fn themes(&self, dark: bool) -> QString {
         let dir = paths::themes_dir().ok();
-        let list = theme::list(dir.as_deref());
+        let list = theme::list(dark, dir.as_deref());
         QString::from(&serde_json::to_string(&list).expect("theme list serializes"))
     }
 
-    pub fn load_theme(mut self: Pin<&mut Self>, id: &QString) -> QString {
+    pub fn scheme(mut self: Pin<&mut Self>, id: &QString, dark: bool) -> QString {
         let dir = paths::themes_dir().ok();
-        match theme::resolve(&id.to_string(), dir.as_deref()) {
-            Ok(resolved) => {
-                *self.rust().watched.lock().unwrap() = resolved
-                    .files
-                    .into_iter()
-                    .map(|path| {
-                        let seen = modified(&path);
-                        (path, seen)
-                    })
-                    .collect();
-                self.as_mut().start_watcher();
-                QString::from(&theme::to_qml(&resolved.theme).to_string())
-            }
-            Err(e) => {
-                self.report(Err(e));
-                QString::default()
-            }
+        let (resolved, error) = theme::resolve(&id.to_string(), dark, dir.as_deref());
+        *self.rust().watched.lock().unwrap() = resolved
+            .watch
+            .into_iter()
+            .map(|path| {
+                let seen = modified(&path);
+                (path, seen)
+            })
+            .collect();
+        self.as_mut().start_watcher();
+        if let Some(e) = error {
+            self.as_mut().report(Err(e));
         }
+        QString::from(&resolved.scheme.to_json().to_string())
+    }
+
+    pub fn font_file(&self, name: &QString) -> QString {
+        let name = name.to_string();
+        paths::font_dirs()
+            .into_iter()
+            .map(|dir| dir.join(&name))
+            .find(|path| path.is_file())
+            .map(|path| QString::from(&format!("file://{}", path.display())))
+            .unwrap_or_default()
     }
 
     pub fn themes_folder(self: Pin<&mut Self>) -> QString {
@@ -183,7 +194,8 @@ impl qobject::Config {
         }
     }
 
-    /// Polls the current theme's files; cheap enough and needs no inotify plumbing.
+    /// Polls what the current scheme came from; cheap enough and needs no
+    /// inotify plumbing. A folder's time changes as files come and go in it.
     fn start_watcher(mut self: Pin<&mut Self>) {
         if self.rust().watcher_started {
             return;
@@ -207,7 +219,7 @@ impl qobject::Config {
                         });
                 if changed
                     && qt_thread
-                        .queue(|config| config.theme_file_changed())
+                        .queue(|config| config.scheme_files_changed())
                         .is_err()
                 {
                     break;

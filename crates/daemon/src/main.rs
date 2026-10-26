@@ -4,6 +4,7 @@ mod table;
 mod token;
 
 use std::collections::VecDeque;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -58,7 +59,11 @@ fn parse_args() -> Result<Args> {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_target(false).init();
+    // No colour codes when logging to the journal (systemd service) or a file.
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .with_ansi(std::io::stdout().is_terminal())
+        .init();
     let args = parse_args()?;
 
     let token_path = plusysmon_protocol::token_path().context("cannot determine config dir")?;

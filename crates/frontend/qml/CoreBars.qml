@@ -1,12 +1,12 @@
 import QtQuick
 import PluSystemMonitor
 
-// One vertical bar per logical core.
+// One pill per logical core, filling from the bottom.
 Row {
     id: root
 
     property list<real> values
-    property color color: Theme.cpu
+    property color color: Appearance.colors.cpu
 
     readonly property int count: Math.max(1, values.length)
 
@@ -20,19 +20,20 @@ Row {
 
             width: (root.width - root.spacing * (root.count - 1)) / root.count
             height: root.height
-            radius: Math.min(4, width / 2)
-            color: Theme.track
+            radius: Math.min(Appearance.rounding.full, width / 2)
+            color: Appearance.colors.tonal(root.color)
 
             Rectangle {
                 anchors.bottom: parent.bottom
                 width: parent.width
-                height: Math.max(2, parent.height * modelData / 100)
+                height: Math.max(width, parent.height * modelData / 100)
                 radius: parent.radius
                 color: root.color
-                opacity: 0.45 + 0.55 * modelData / 100
+                opacity: 0.55 + 0.45 * modelData / 100
 
                 Behavior on height {
-                    NumberAnimation { duration: 500; easing.type: Easing.OutCubic }
+                    enabled: !Appearance.performanceMode
+                    NumberAnimation { duration: 500; easing.type: Easing.BezierSpline; easing.bezierCurve: Appearance.curves.expressiveEffects }
                 }
             }
         }

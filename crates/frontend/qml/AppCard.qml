@@ -1,7 +1,9 @@
 import QtQuick
 import PluSystemMonitor
 
-// One app in the Apps grid. Games get their Steam artwork and logo.
+// One app in the Apps grid, as a media card: it lifts and leans toward the
+// pointer on a spring, and gives under a press. Games get their Steam
+// artwork and logo.
 Item {
     id: card
 
@@ -35,18 +37,54 @@ Item {
     Item {
         id: body
 
+        // How far it leans toward the pointer, in degrees.
+        property real tiltX: hover.hovered ? (hover.point.position.x / width - 0.5) * 12 : 0
+        property real tiltY: hover.hovered ? (0.5 - hover.point.position.y / height) * 10 : 0
+
         anchors.fill: parent
-        anchors.margins: Theme.spacing / 2
-        scale: hover.hovered ? 1.015 : 1
+        anchors.margins: Appearance.sizes.shelfGap / 2
+        scale: tap.pressed ? 0.95 : hover.hovered ? 1.03 : 1
+        opacity: tap.pressed ? 0.86 : 1
 
         Behavior on scale {
-            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+            enabled: !Appearance.performanceMode
+            Bounce {}
         }
+        Behavior on opacity {
+            NumberAnimation { duration: Appearance.duration(120) }
+        }
+        Behavior on tiltX {
+            enabled: !Appearance.performanceMode
+            SpringAnimation { spring: 4; damping: 0.3; epsilon: 0.01 }
+        }
+        Behavior on tiltY {
+            enabled: !Appearance.performanceMode
+            SpringAnimation { spring: 4; damping: 0.3; epsilon: 0.01 }
+        }
+
+        transform: [
+            Rotation {
+                origin.x: body.width / 2
+                origin.y: body.height / 2
+                axis { x: 0; y: 1; z: 0 }
+                angle: body.tiltX
+            },
+            Rotation {
+                origin.x: body.width / 2
+                origin.y: body.height / 2
+                axis { x: 1; y: 0; z: 0 }
+                angle: body.tiltY
+            }
+        ]
 
         Rectangle {
             anchors.fill: parent
-            radius: Theme.radius
-            color: Theme.card
+            radius: Appearance.rounding.large
+            color: card.selected ? Appearance.colors.secondaryContainer : Appearance.colors.layer2
+
+            Behavior on color {
+                ElementMoveFastColor {}
+            }
         }
 
         // Artwork fading into the card, as on a store page.
@@ -55,19 +93,19 @@ Item {
 
             width: parent.width
             height: parent.height * 0.62
-            radius: Theme.radius
+            radius: Appearance.rounding.large
             topOnly: true
             source: card.art
-            opacity: 0.75
+            opacity: 0.8
         }
         Rectangle {
             visible: artwork.visible
             width: artwork.width
             height: artwork.height + 1
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.alpha(Theme.background, 0.0) }
-                GradientStop { position: 0.55; color: Qt.alpha(Theme.background, 0.35) }
-                GradientStop { position: 1.0; color: Qt.alpha(Theme.background, 0.92) }
+                GradientStop { position: 0.0; color: Qt.alpha(Appearance.colors.layer2, 0.0) }
+                GradientStop { position: 0.55; color: Qt.alpha(Appearance.colors.layer2, 0.35) }
+                GradientStop { position: 1.0; color: card.selected ? Appearance.colors.secondaryContainer : Appearance.colors.layer2 }
             }
         }
 
@@ -85,19 +123,15 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            radius: Theme.radius
+            radius: Appearance.rounding.large
             color: "transparent"
-            border.width: card.selected ? 2 : 1
-            border.color: card.selected ? Theme.primary : hover.hovered ? Qt.alpha(Theme.primary, 0.5) : Theme.cardBorder
-
-            Behavior on border.color {
-                ColorAnimation { duration: 160 }
-            }
+            border.width: card.selected ? 2 : 0
+            border.color: Appearance.colors.primary
         }
 
         Item {
             anchors.fill: parent
-            anchors.margins: Theme.padding - 4
+            anchors.margins: 18
 
             Row {
                 id: title
@@ -118,11 +152,10 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 3
 
-                    Text {
+                    StyledText {
                         width: parent.width
                         text: card.name
-                        color: Theme.text
-                        font.pixelSize: 15
+                        color: card.selected ? Appearance.colors.onSecondaryContainer : Appearance.colors.onSurface
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
                     }
@@ -132,25 +165,24 @@ Item {
                         Rectangle {
                             visible: card.game
                             anchors.verticalCenter: parent.verticalCenter
-                            width: gameLabel.implicitWidth + 12
-                            height: 18
-                            radius: 9
-                            color: Qt.alpha(Theme.gpu, 0.2)
+                            width: gameLabel.implicitWidth + 16
+                            height: 20
+                            radius: height / 2
+                            color: Appearance.colors.tertiaryContainer
 
-                            Text {
+                            StyledText {
                                 id: gameLabel
                                 anchors.centerIn: parent
-                                text: "GAME"
-                                color: Theme.gpu
-                                font.pixelSize: 10
-                                font.weight: Font.Bold
-                                font.letterSpacing: 1
+                                text: "Game"
+                                color: Appearance.colors.onTertiaryContainer
+                                font.pixelSize: Appearance.fontSize.smaller
+                                font.weight: Font.DemiBold
                             }
                         }
-                        Text {
+                        StyledText {
                             text: card.processCount === 1 ? "1 process" : card.processCount + " processes"
-                            color: Theme.textDim
-                            font.pixelSize: 12
+                            color: Appearance.colors.onSurfaceVariant
+                            font.pixelSize: Appearance.fontSize.smaller
                         }
                     }
                 }
@@ -163,32 +195,29 @@ Item {
                 anchors.bottomMargin: 6
                 spacing: 18
 
-                Text {
+                TitleText {
                     text: card.cpu.toFixed(1) + "%"
-                    color: Theme.cpu
+                    color: Appearance.colors.cpu
                     font.pixelSize: 20
-                    font.weight: Font.Bold
-                    font.features: { "tnum": 1 }
+                    tabularNumbers: true
                 }
-                Text {
+                StyledText {
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 2
                     // Many apps hold some VRAM; only actual GPU work is worth a number here.
                     visible: card.gpu >= 0.5
                     text: "GPU " + card.gpu.toFixed(0) + "%"
-                    color: Theme.gpu
-                    font.pixelSize: 15
+                    color: Appearance.colors.gpu
                     font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
+                    tabularNumbers: true
                 }
-                Text {
+                StyledText {
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 2
                     text: Format.bytes(card.memory)
-                    color: Theme.memory
-                    font.pixelSize: 15
+                    color: Appearance.colors.memory
                     font.weight: Font.DemiBold
-                    font.features: { "tnum": 1 }
+                    tabularNumbers: true
                 }
             }
 
@@ -203,7 +232,7 @@ Item {
                 // Scale to the app's own peak so quiet apps still show their rhythm.
                 maxValue: Math.max(2, card.peak) * 1.15
                 interval: card.interval
-                color: Theme.cpu
+                color: Appearance.colors.cpu
             }
         }
 
@@ -212,6 +241,7 @@ Item {
             cursorShape: Qt.PointingHandCursor
         }
         TapHandler {
+            id: tap
             onTapped: card.clicked()
         }
     }

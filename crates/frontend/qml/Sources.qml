@@ -7,6 +7,9 @@ import PluSystemMonitor
 //
 //     readonly property var sources: { monitor.revision; return Sources.read(monitor, ids) }
 QtObject {
+    /// The data colours a widget can be set to (Scheme.js `accent`).
+    readonly property var accentKeys: ["cpu", "memory", "swap", "gpu", "network", "disk"]
+
     function read(monitor, ids) {
         return (ids ?? []).map(id => {
             const json = monitor ? monitor.metric(id) : ""
@@ -37,14 +40,14 @@ QtObject {
     // Why a source shows nothing.
     function absence(source, monitor) {
         if (!source)
-            return "Pick a source in the widget's settings"
+            return "Pick a source in the widget's settings."
         if (!monitor || !monitor.connected)
             return "Waiting for data…"
         if (source.id.startsWith("game."))
-            return "No game running"
+            return "No game is running."
         if (source.id.startsWith("app."))
-            return "Not running"
-        return "Not available on this machine"
+            return "It isn't running."
+        return "This machine doesn't report it."
     }
 
     // App and game sources need the daemon to collect processes.
@@ -63,9 +66,39 @@ QtObject {
         return sources.map((source, i) => {
             let key = i === 0 && main && main !== "auto" ? main : source.accent
             if (used.includes(key))
-                key = Theme.accentKeys.find(k => !used.includes(k)) ?? key
+                key = accentKeys.find(k => !used.includes(k)) ?? key
             used.push(key)
-            return Theme.accent(key)
+            return Appearance.colors.accent(key)
         })
+    }
+
+    // The symbol and the shape a source is shown with: a chip on a cookie
+    // with teeth for the processor, a gem for graphics, a sun for heat.
+    function look(source) {
+        const id = source ? source.id : ""
+        const unit = source ? source.unit : ""
+        if (unit === "celsius")
+            return { symbol: "thermostat", shape: "sunny" }
+        if (unit === "watts" || unit === "volts" || unit === "amps")
+            return { symbol: "bolt", shape: "burst" }
+        if (unit === "rpm")
+            return { symbol: "mode_fan", shape: "clover8" }
+        if (unit === "megahertz")
+            return { symbol: "speed", shape: "softBurst" }
+        if (id.startsWith("game."))
+            return { symbol: "sports_esports", shape: "puffy" }
+        if (id.startsWith("app."))
+            return { symbol: "apps", shape: "flower" }
+        if (id.startsWith("gpu."))
+            return { symbol: "developer_board", shape: "gem" }
+        if (id === "memory.swap")
+            return { symbol: "swap_horiz", shape: "clamShell" }
+        if (id.startsWith("memory."))
+            return { symbol: "memory_alt", shape: "pill" }
+        if (id.startsWith("cpu."))
+            return { symbol: "memory", shape: "cookie12" }
+        if (id.startsWith("sensor."))
+            return { symbol: "sensors", shape: "cookie7" }
+        return { symbol: "monitoring", shape: "cookie9" }
     }
 }

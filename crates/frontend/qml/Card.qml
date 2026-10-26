@@ -1,76 +1,73 @@
 import QtQuick
 import PluSystemMonitor
 
-// Translucent panel with a title and an accent hairline along the top edge.
+// A widget's card on the dashboard sheet (layer2): the source's symbol on its
+// shape, tinted in the data's colour, the title, and an optional reading at
+// the end of the row. Hovering the card turns the shape.
 Item {
     id: root
 
     property string title
     property string subtitle
-    property color accent: Theme.cpu
+    property color accent: Appearance.colors.cpu
+    property string symbol: "monitoring"
+    property string shape: "cookie9"
     default property alias content: body.data
+
+    readonly property real padding: 18
 
     Rectangle {
         anchors.fill: parent
-        radius: Theme.radius
-        color: Theme.card
-        border.color: Theme.cardBorder
-        border.width: 1
-
-        // Soft sheen from the top, like light hitting glass.
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: 1
-            radius: parent.radius - 1
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.cardHighlight }
-                GradientStop { position: 0.35; color: "transparent" }
-            }
-        }
-
-        Rectangle {
-            anchors.top: parent.top
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width * 0.6
-            height: 1
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.5; color: root.accent }
-                GradientStop { position: 1.0; color: "transparent" }
-            }
-        }
+        radius: Appearance.rounding.large
+        color: Appearance.colors.layer2
     }
 
-    Row {
-        id: header
+    HoverHandler {
+        id: hover
+    }
 
-        x: Theme.padding
-        y: Theme.padding - 4
-        spacing: 10
+    ShapeIcon {
+        id: badge
+        x: root.padding - 2
+        y: root.padding - 4
+        size: 32
+        iconSize: 17
+        shape: root.shape
+        symbol: root.symbol
+        color: Appearance.colors.tonal(root.accent)
+        iconColor: root.accent
+        hovered: hover.hovered
+    }
 
-        Text {
-            text: root.title.toUpperCase()
-            color: Theme.textDim
-            font.pixelSize: 12
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.6
-        }
-        Text {
-            text: root.subtitle
-            color: root.accent
-            font.pixelSize: 12
-            font.weight: Font.DemiBold
-            font.features: { "tnum": 1 }
-            visible: text.length > 0
-        }
+    StyledText {
+        anchors.left: badge.right
+        anchors.leftMargin: 10
+        anchors.right: reading.visible ? reading.left : parent.right
+        anchors.rightMargin: reading.visible ? 8 : root.padding
+        anchors.verticalCenter: badge.verticalCenter
+        text: root.title
+        elide: Text.ElideRight
+        font.weight: Font.DemiBold
+    }
+
+    StyledText {
+        id: reading
+        anchors.right: parent.right
+        anchors.rightMargin: root.padding
+        anchors.verticalCenter: badge.verticalCenter
+        visible: root.subtitle.length > 0
+        text: root.subtitle
+        color: Appearance.colors.onSurfaceVariant
+        font.pixelSize: Appearance.fontSize.smallie
+        font.weight: Font.DemiBold
+        tabularNumbers: true
     }
 
     Item {
         id: body
 
         anchors.fill: parent
-        anchors.margins: Theme.padding
-        anchors.topMargin: header.y + header.height + 14
+        anchors.margins: root.padding
+        anchors.topMargin: badge.y + badge.height + 12
     }
 }

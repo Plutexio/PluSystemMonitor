@@ -1,9 +1,10 @@
 import QtQuick
-import QtQuick.Controls.Basic
+import QtQuick.Templates as T
 import PluSystemMonitor
 
-// Searchable list of the data sources the connected machine offers.
-GlassPopup {
+// Searchable list of the data sources the connected machine offers, grouped
+// by what they belong to.
+StyledDialog {
     id: root
 
     required property Monitor monitor
@@ -18,115 +19,105 @@ GlassPopup {
             !query || source.name.toLowerCase().includes(query) || source.category.toLowerCase().includes(query))
     }
 
-    title: "Add a source"
-    width: 360
-    height: 460
+    headline: qsTr("Add a Source")
+    symbol: "add_chart"
+    iconShape: "clover8"
+    preferredWidth: 420
     onAboutToShow: {
         search.text = ""
-        search.forceActiveFocus()
+        search.focusField()
     }
 
-    contentItem: Column {
-        spacing: 12
+    SearchField {
+        id: search
+        width: parent.width
+        placeholder: qsTr("Search sources")
+    }
 
-        GlassField {
-            id: search
-            width: parent.width
-            leftPadding: 40
-            placeholderText: "Search sources"
+    ListView {
+        id: list
 
-            Icon {
-                x: 13
-                anchors.verticalCenter: parent.verticalCenter
-                name: "search"
-                color: Theme.textDim
-                size: 16
-            }
+        width: parent.width
+        height: Math.min(380, root.maximumHeight - 220)
+        clip: true
+        spacing: 2
+        boundsBehavior: Flickable.StopAtBounds
+        model: root.matches
+        section.property: "category"
+        section.delegate: SectionLabel {
+            required property string section
+            width: list.width - 10
+            inset: 4
+            text: section
         }
 
-        ListView {
-            id: list
+        T.ScrollBar.vertical: StyledScrollBar {}
 
-            width: parent.width
-            height: parent.height - search.height - parent.spacing
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
-            model: root.matches
-            section.property: "category"
-            section.delegate: Text {
-                required property string section
-                width: list.width
-                topPadding: 10
-                bottomPadding: 4
-                text: section.toUpperCase()
-                color: Theme.textDim
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.2
+        delegate: RippleButton {
+            id: row
+
+            required property var modelData
+            readonly property bool taken: root.taken.includes(modelData.id)
+            readonly property color tint: Appearance.colors.accent(modelData.accent)
+
+            width: list.width - 10
+            height: 40
+            enabled: !taken
+            opacity: 1
+            buttonRadius: Appearance.rounding.small
+            colBackgroundHover: Appearance.colors.layer3Hover
+            colRipple: Appearance.colors.layer3Active
+            bounce: false
+            onClicked: {
+                root.picked(modelData.id)
+                root.close()
             }
 
-            ScrollBar.vertical: ScrollBar {
-                width: 8
-                contentItem: Rectangle {
-                    // A custom handle skips the style's "only when needed" logic.
-                    visible: parent.size < 1.0
-                    implicitWidth: 4
-                    radius: 2
-                    color: Theme.textDim
-                    opacity: 0.4
-                }
-            }
-
-            delegate: Rectangle {
-                id: row
-
-                required property var modelData
-                readonly property bool taken: root.taken.includes(modelData.id)
-
-                width: list.width - 10
-                height: 34
-                radius: 9
-                color: hover.hovered && !taken ? Qt.alpha(Theme.accent(modelData.accent), 0.14) : "transparent"
-
+            contentItem: Item {
                 Rectangle {
-                    x: 10
+                    id: marker
+                    x: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: Theme.accent(row.modelData.accent)
+                    width: 10
+                    height: 10
+                    radius: 5
+                    color: row.tint
                 }
-                Text {
-                    x: 28
+                StyledText {
+                    anchors.left: marker.right
+                    anchors.leftMargin: 12
+                    anchors.right: trailing.left
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - 40
                     text: row.modelData.name
-                    color: row.taken ? Theme.textDim : Theme.text
-                    font.pixelSize: 13
+                    color: row.taken ? Appearance.colors.onSurfaceVariant : Appearance.colors.onSurface
+                    font.pixelSize: Appearance.fontSize.smallie
                     elide: Text.ElideRight
                 }
-                Icon {
+                MaterialSymbol {
+                    id: trailing
                     anchors.right: parent.right
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    name: row.taken ? "check" : "plus"
-                    color: row.taken ? Theme.textDim : Theme.accent(row.modelData.accent)
-                    size: 16
-                    opacity: row.taken || hover.hovered ? 1 : 0
-                }
+                    text: row.taken ? "check" : "add"
+                    iconSize: 20
+                    color: row.taken ? Appearance.colors.onSurfaceVariant : row.tint
+                    opacity: row.taken || row.hovered ? 1 : 0
 
-                HoverHandler {
-                    id: hover
-                    cursorShape: row.taken ? Qt.ArrowCursor : Qt.PointingHandCursor
-                }
-                TapHandler {
-                    enabled: !row.taken
-                    onTapped: {
-                        root.picked(row.modelData.id)
-                        root.close()
+                    Behavior on opacity {
+                        NumberAnimation { duration: Appearance.duration(150) }
                     }
                 }
             }
         }
+    }
+
+    EmptyState {
+        anchors.horizontalCenter: parent.horizontalCenter
+        visible: list.count === 0
+        symbol: "search_off"
+        title: qsTr("Nothing Matches")
+        description: root.monitor.connected ? qsTr("Check the spelling or try a new search.")
+                                            : qsTr("Connect to a machine to see what it offers.")
     }
 }
