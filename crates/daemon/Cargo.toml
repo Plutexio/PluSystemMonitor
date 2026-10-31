@@ -10,7 +10,9 @@ plusysmon-protocol.workspace = true
 anyhow.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "time", "macros", "sync", "signal"] }
+tokio-rustls.workspace = true
 tokio-tungstenite.workspace = true
+rcgen.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 libc.workspace = true

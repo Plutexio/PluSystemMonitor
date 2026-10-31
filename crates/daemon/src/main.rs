@@ -1,6 +1,7 @@
 mod collect;
 mod server;
 mod table;
+mod tls;
 mod token;
 
 use std::collections::VecDeque;
@@ -24,12 +25,15 @@ Options:
                          Use 0.0.0.0:7878 to accept connections from other machines.
   --interval-ms <MS>     Sampling interval [default: 1000]
   --history-secs <SECS>  How much history to keep for new clients [default: 1800]
+  --fingerprint          Print the TLS certificate's fingerprint, the one frontends
+                         ask you to compare when first connecting, and exit
   -h, --help             Print this help";
 
 struct Args {
     listen: SocketAddr,
     interval_ms: u32,
     history_secs: u32,
+    print_fingerprint: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -37,6 +41,7 @@ fn parse_args() -> Result<Args> {
         listen: SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT)),
         interval_ms: 1000,
         history_secs: 1800,
+        print_fingerprint: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -45,6 +50,7 @@ fn parse_args() -> Result<Args> {
             "--listen" => args.listen = value()?.parse().context("--listen")?,
             "--interval-ms" => args.interval_ms = value()?.parse().context("--interval-ms")?,
             "--history-secs" => args.history_secs = value()?.parse().context("--history-secs")?,
+            "--fingerprint" => args.print_fingerprint = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -65,6 +71,13 @@ fn main() -> Result<()> {
         .with_ansi(std::io::stdout().is_terminal())
         .init();
     let args = parse_args()?;
+
+    let cert_path = plusysmon_protocol::tls_cert_path().context("cannot determine config dir")?;
+    let identity = tls::load_or_create(&cert_path)?;
+    if args.print_fingerprint {
+        println!("{}", identity.fingerprint);
+        return Ok(());
+    }
 
     let token_path = plusysmon_protocol::token_path().context("cannot determine config dir")?;
     let token = token::load_or_create(&token_path)?;
@@ -96,14 +109,12 @@ fn main() -> Result<()> {
             let listener = TcpListener::bind(args.listen)
                 .await
                 .with_context(|| format!("binding {}", args.listen))?;
-            info!("listening on ws://{}", args.listen);
-            if !args.listen.ip().is_loopback() {
-                warn!("accepting remote connections; traffic is not encrypted yet");
-            }
+            info!("listening on wss://{}", args.listen);
+            info!("certificate fingerprint: {}", identity.fingerprint);
 
             tokio::spawn(sample_loop(shared.clone(), capacity, args.interval_ms));
             tokio::select! {
-                res = server::serve(listener, shared) => res,
+                res = server::serve(listener, identity.acceptor, shared) => res,
                 _ = shutdown_signal() => {
                     info!("shutting down");
                     Ok(())

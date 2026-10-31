@@ -10,6 +10,7 @@ mod paths;
 mod prefs;
 mod processes;
 mod theme;
+mod tls;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 

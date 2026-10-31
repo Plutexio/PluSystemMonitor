@@ -1,6 +1,6 @@
 //! Daemon connection, run on its own thread so the Qt event loop never blocks on I/O.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -9,9 +9,13 @@ use plusysmon_protocol::{
     self as proto, ClientMsg, DEFAULT_PORT, PROTOCOL_VERSION, ProcessUpdate, Sample, ServerMsg,
     Signal,
 };
+use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_tungstenite::tungstenite::Message;
+
+use crate::tls;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -23,6 +27,7 @@ pub enum Event {
         interval_ms: u32,
         uid: u32,
         history: Vec<Sample>,
+        fingerprint: String,
     },
     Sample(Sample),
     Processes(ProcessUpdate),
@@ -40,6 +45,13 @@ pub enum Event {
     Lost(String),
     /// The daemon refused us (bad token, version mismatch); no retry.
     Rejected(String),
+    /// The daemon's certificate isn't one we trust; no retry until the user
+    /// decides. `pinned` is the one it should have had, if we knew this address.
+    Untrusted {
+        authority: String,
+        fingerprint: String,
+        pinned: Option<String>,
+    },
 }
 
 /// Requests from the UI. They survive reconnects: subscriptions are re-sent
@@ -53,6 +65,10 @@ pub enum Command {
 enum End {
     Closed,
     Rejected(String),
+    Untrusted {
+        fingerprint: String,
+        pinned: Option<String>,
+    },
 }
 
 /// Connects to `address` and keeps reconnecting until `stop` is notified,
@@ -84,15 +100,27 @@ async fn run(
     commands: &mut UnboundedReceiver<Command>,
     on_event: &mut impl FnMut(Event) -> bool,
 ) {
-    let url = to_url(address);
+    let authority = authority(address);
     let mut want_processes = false;
     loop {
-        if !on_event(Event::Connecting(url.clone())) {
+        if !on_event(Event::Connecting(format!("wss://{authority}"))) {
             return;
         }
-        let event = match session(&url, token, commands, &mut want_processes, on_event).await {
+        let event = match session(&authority, token, commands, &mut want_processes, on_event).await
+        {
             Ok(End::Rejected(reason)) => {
                 on_event(Event::Rejected(reason));
+                return;
+            }
+            Ok(End::Untrusted {
+                fingerprint,
+                pinned,
+            }) => {
+                on_event(Event::Untrusted {
+                    authority,
+                    fingerprint,
+                    pinned,
+                });
                 return;
             }
             Ok(End::Closed) => Event::Lost("connection closed".to_owned()),
@@ -106,15 +134,52 @@ async fn run(
 }
 
 async fn session(
-    url: &str,
+    authority: &str,
     token: &str,
     commands: &mut UnboundedReceiver<Command>,
     want_processes: &mut bool,
     on_event: &mut impl FnMut(Event) -> bool,
 ) -> Result<End> {
-    let (mut ws, _) = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(url))
+    // Read on every attempt: this machine's daemon makes its certificate on first run.
+    let pinned = tls::pinned(authority);
+    let accepted: Vec<String> = pinned
+        .iter()
+        .cloned()
+        .chain(tls::local_fingerprint())
+        .collect();
+    let presented = Arc::new(Mutex::new(None));
+    let connector = tls::connector(accepted.clone(), presented.clone())?;
+
+    let handshake = async {
+        let tcp = TcpStream::connect(authority).await?;
+        let name = ServerName::try_from(tls::SERVER_NAME)?;
+        anyhow::Ok(connector.connect(name, tcp).await)
+    };
+    let stream = match tokio::time::timeout(CONNECT_TIMEOUT, handshake)
         .await
-        .context("timed out")??;
+        .context("timed out")??
+    {
+        Ok(stream) => stream,
+        // A certificate we know failing anyway is no question for the user: its
+        // holder couldn't prove it's theirs, or the handshake broke some other way.
+        Err(e) => {
+            return match presented.lock().unwrap().take() {
+                Some(fingerprint) if !accepted.contains(&fingerprint) => Ok(End::Untrusted {
+                    fingerprint,
+                    pinned,
+                }),
+                _ => Err(e).context("TLS handshake failed; is the daemon up to date?"),
+            };
+        }
+    };
+    let fingerprint = presented.lock().unwrap().take().unwrap_or_default();
+    let url = format!("wss://{authority}");
+    let (mut ws, _) = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        tokio_tungstenite::client_async(url.as_str(), stream),
+    )
+    .await
+    .context("timed out")??;
     let hello = ClientMsg::Hello {
         version: PROTOCOL_VERSION,
         token: token.to_owned(),
@@ -160,6 +225,7 @@ async fn session(
                 interval_ms,
                 uid,
                 history,
+                fingerprint: fingerprint.clone(),
             },
             ServerMsg::Sample(sample) => Event::Sample(sample),
             ServerMsg::Processes(update) => Event::Processes(update),
@@ -176,28 +242,26 @@ async fn session(
     Ok(End::Closed)
 }
 
-/// Accepts `host`, `host:port` or a full `ws://` URL.
-fn to_url(address: &str) -> String {
-    if address.contains("://") {
-        return address.to_owned();
-    }
-    let has_port = address
+/// `host:port` of an address given as `host`, `host:port` or a URL. A URL's
+/// scheme doesn't matter: connections are always encrypted, whatever it says.
+pub fn authority(address: &str) -> String {
+    let rest = address.split_once("://").map_or(address, |(_, rest)| rest);
+    let host = rest.split('/').next().unwrap_or_default();
+    let has_port = host
         .rsplit_once(':')
         .is_some_and(|(_, port)| port.parse::<u16>().is_ok())
-        && !address.ends_with(']');
+        && !host.ends_with(']');
     if has_port {
-        format!("ws://{address}")
+        host.to_owned()
     } else {
-        format!("ws://{address}:{DEFAULT_PORT}")
+        format!("{host}:{DEFAULT_PORT}")
     }
 }
 
 pub fn is_local(address: &str) -> bool {
-    let host = to_url(address);
-    let host = host.split("://").nth(1).unwrap_or_default();
-    ["localhost", "127.0.0.1", "[::1]"]
-        .iter()
-        .any(|local| host.starts_with(local))
+    let authority = authority(address);
+    let host = authority.rsplit_once(':').map_or("", |(host, _)| host);
+    ["localhost", "127.0.0.1", "[::1]"].contains(&host)
 }
 
 #[cfg(test)]
@@ -205,17 +269,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_urls() {
-        assert_eq!(to_url("192.168.1.10"), "ws://192.168.1.10:7878");
-        assert_eq!(to_url("192.168.1.10:9000"), "ws://192.168.1.10:9000");
-        assert_eq!(to_url("[::1]"), "ws://[::1]:7878");
-        assert_eq!(to_url("ws://box:1"), "ws://box:1");
+    fn finds_the_authority() {
+        assert_eq!(authority("192.168.1.10"), "192.168.1.10:7878");
+        assert_eq!(authority("192.168.1.10:9000"), "192.168.1.10:9000");
+        assert_eq!(authority("[::1]"), "[::1]:7878");
+        assert_eq!(authority("[::1]:9000"), "[::1]:9000");
+        assert_eq!(authority("ws://box:1"), "box:1");
+        assert_eq!(authority("wss://box/"), "box:7878");
     }
 
     #[test]
     fn detects_local() {
         assert!(is_local("127.0.0.1"));
         assert!(is_local("localhost:7878"));
+        assert!(is_local("[::1]"));
         assert!(!is_local("192.168.1.10"));
+    }
+
+    /// The local token must not go to a machine that merely looks local.
+    #[test]
+    fn lookalikes_are_not_local() {
+        assert!(!is_local("127.0.0.1.example.com"));
+        assert!(!is_local("localhost.example.com:7878"));
     }
 }

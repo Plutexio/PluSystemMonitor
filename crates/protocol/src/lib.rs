@@ -1,5 +1,8 @@
 //! Wire protocol shared by the daemon and its frontends.
 //!
+//! Connections are TLS 1.3, always; the daemon's certificate is self-signed and
+//! clients pin its [`cert_fingerprint`], so the token in the hello stays secret.
+//!
 //! Every WebSocket binary frame carries one MessagePack-encoded message.
 //! The client opens with [`ClientMsg::Hello`]; the daemon answers with
 //! [`ServerMsg::Welcome`] (including buffered history) and then streams
@@ -11,6 +14,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Bumped on any incompatible change to the message types.
 pub const PROTOCOL_VERSION: u32 = 5;
@@ -265,9 +269,33 @@ pub fn token_path() -> Option<PathBuf> {
     Some(config_dir()?.join("token"))
 }
 
+/// The daemon's TLS certificate (DER). A local frontend trusts whoever holds
+/// the key to this one, so it never has to ask about its own machine's daemon.
+pub fn tls_cert_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("tls-cert.der"))
+}
+
+/// SHA-256 of a DER certificate as `AB:CD:…`, the form `openssl x509 -fingerprint`
+/// prints. This is what identifies a daemon: certificates are self-signed.
+pub fn cert_fingerprint(der: &[u8]) -> String {
+    let digest = Sha256::digest(der);
+    let hex: Vec<String> = digest.iter().map(|byte| format!("{byte:02X}")).collect();
+    hex.join(":")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fingerprints_like_openssl() {
+        // printf abc | sha256sum
+        assert_eq!(
+            cert_fingerprint(b"abc"),
+            "BA:78:16:BF:8F:01:CF:EA:41:41:40:DE:5D:AE:22:23:\
+             B0:03:61:A3:96:17:7A:9C:B4:10:FF:61:F2:00:15:AD"
+        );
+    }
 
     #[test]
     fn roundtrip() {

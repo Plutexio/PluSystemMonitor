@@ -21,6 +21,10 @@ pub fn prefs_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("frontend.toml"))
 }
 
+pub fn known_daemons_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("known_daemons.toml"))
+}
+
 /// Where Google Sans Flex and Material Symbols may be installed beside the app
 /// (`install.sh` puts them in the prefix's share folder), when the system has
 /// none of its own. Swiftify ships the same two faces.

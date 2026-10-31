@@ -31,6 +31,20 @@ Window {
         savePrefs()
     }
 
+    // Called once connected, so the list only holds machines that worked.
+    function rememberConnection() {
+        const connection = prefs.connection
+        const others = connection.recent.filter(entry => entry.address !== connection.address)
+        const latest = { address: connection.address, token: connection.token, hostname: monitor.hostname }
+        setPref("connection", Object.assign({}, connection, { recent: [latest, ...others].slice(0, 8) }))
+    }
+
+    function forgetConnection(address) {
+        const connection = prefs.connection
+        const recent = connection.recent.filter(entry => entry.address !== address)
+        setPref("connection", Object.assign({}, connection, { recent: recent }))
+    }
+
     function applyScheme() {
         Appearance.applyScheme(JSON.parse(Config.scheme(prefs.theme, wantsDark)))
     }
@@ -311,10 +325,18 @@ Window {
         monitor: monitor
         address: window.prefs.connection.address
         token: window.prefs.connection.token
+        currentAddress: window.prefs.connection.address
+        recent: window.prefs.connection.recent
         onConnectRequested: (address, token) => {
-            window.setPref("connection", { address: address, token: token })
+            window.setPref("connection", Object.assign({}, window.prefs.connection, { address: address, token: token }))
             monitor.connectTo(address, token)
         }
+        onForgetRequested: address => window.forgetConnection(address)
+    }
+
+    TrustDialog {
+        id: trustDialog
+        onTrusted: (authority, fingerprint) => monitor.trustFingerprint(authority, fingerprint)
     }
 
     AppearanceDialog {
@@ -335,6 +357,13 @@ Window {
     Connections {
         target: monitor
         function onActionFailed(message) { snackbar.show(message) }
+        function onConnectedChanged() {
+            if (monitor.connected)
+                window.rememberConnection()
+        }
+        function onTrustRequested(authority, fingerprint, previous) {
+            trustDialog.ask(authority, fingerprint, previous)
+        }
     }
 
     // Edits come in bursts (drag, then options); write once things settle.

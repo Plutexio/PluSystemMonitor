@@ -3,7 +3,7 @@
 A lightweight, good-looking system monitor split into a daemon and a frontend.
 
 - **`plusysmond`** (`crates/daemon`) collects metrics from `/proc`, keeps a history
-  buffer and streams samples over WebSocket (MessagePack frames).
+  buffer and streams samples over encrypted WebSocket (MessagePack frames).
 - **`plusysmon`** (`crates/frontend`) is a Qt Quick / QML app (via cxx-qt) that can
   connect to a daemon on this machine or any other.
 - **`plusysmon-protocol`** (`crates/protocol`) holds the shared message types.
@@ -49,8 +49,27 @@ plusysmond --listen 0.0.0.0:7878
 cat ~/.config/plusysmon/token              # paste this into the frontend
 ```
 
-On localhost the frontend reads the token file itself. Traffic is **not encrypted
-yet**, so only expose the daemon on networks you trust.
+On localhost the frontend reads the token file itself. Machines you've connected
+to are listed under **Recent** in the Connection dialog, tokens included (they're
+kept in `~/.config/plusysmon/frontend.toml`, readable only by you).
+
+### Encryption
+
+Connections are always TLS 1.3; there is no unencrypted mode. The daemon makes a
+self-signed certificate on first run (`~/.config/plusysmon/tls-cert.der` and
+`tls-key.der`), so like SSH, the frontend identifies a machine by its fingerprint:
+
+- The first time you connect to a machine, it shows the fingerprint and asks.
+  Compare it with what `plusysmond --fingerprint` prints over there (also in the
+  daemon's log). Your answer is kept in `~/.config/plusysmon/known_daemons.toml`.
+- If a machine later shows a different certificate, the frontend warns you and
+  doesn't connect unless you accept it. Deleting the daemon's two files makes a
+  new certificate and causes this on purpose.
+- This computer's own daemon is recognised from its certificate file, no questions.
+
+The token is only sent after this check, so a machine you haven't accepted never
+sees it. Frontends and daemons from before encryption can't talk to current ones;
+update both.
 
 ## Look and themes
 

@@ -31,6 +31,8 @@ pub mod qobject {
         #[qproperty(bool, connected)]
         #[qproperty(QString, status)]
         #[qproperty(QString, hostname)]
+        /// The certificate fingerprint of the daemon we're connected to, or "".
+        #[qproperty(QString, fingerprint)]
         #[qproperty(i32, interval_ms, cxx_name = "intervalMs")]
         #[qproperty(i32, uid)]
         #[qproperty(QList_f64, cpu_cores, cxx_name = "cpuCores")]
@@ -49,6 +51,10 @@ pub mod qobject {
 
         #[qinvokable]
         fn disconnect_from(self: Pin<&mut Self>);
+
+        /// Remembers a certificate shown by `trustRequested`, then connects again.
+        #[qinvokable]
+        fn trust_fingerprint(self: Pin<&mut Self>, authority: &QString, fingerprint: &QString);
 
         /// `signal` is one of terminate, kill, stop, continue.
         #[qinvokable]
@@ -84,6 +90,17 @@ pub mod qobject {
         /// An icon or artwork finished downloading.
         #[qsignal]
         fn assets_changed(self: Pin<&mut Self>);
+
+        /// The daemon's certificate isn't trusted, so nothing was sent to it and
+        /// the connection stopped. `previous` is the one remembered for this
+        /// address; when it's not empty, the certificate has changed.
+        #[qsignal]
+        fn trust_requested(
+            self: Pin<&mut Self>,
+            authority: &QString,
+            fingerprint: &QString,
+            previous: &QString,
+        );
     }
 
     impl cxx_qt::Threading for Monitor {}
@@ -277,11 +294,13 @@ use crate::assets::AssetCache;
 use crate::client::{self, Command, Event};
 use crate::metrics::Metrics;
 use crate::processes::{self, Process, ProcessTable, Query};
+use crate::tls;
 
 pub struct MonitorRust {
     connected: bool,
     status: QString,
     hostname: QString,
+    fingerprint: QString,
     interval_ms: i32,
     uid: i32,
     cpu_cores: QList<f64>,
@@ -290,6 +309,9 @@ pub struct MonitorRust {
     processes_enabled: bool,
     process_count: i32,
 
+    /// What was asked for last, to connect again once a certificate is trusted.
+    address: QString,
+    token: QString,
     /// Bumped per connection so events queued by a previous one are ignored.
     generation: u64,
     stop: Option<Arc<Notify>>,
@@ -305,6 +327,7 @@ impl Default for MonitorRust {
             connected: false,
             status: QString::from("Not connected"),
             hostname: QString::default(),
+            fingerprint: QString::default(),
             interval_ms: 1000,
             uid: -1,
             cpu_cores: QList::default(),
@@ -312,6 +335,8 @@ impl Default for MonitorRust {
             metric_catalog: QString::from("[]"),
             processes_enabled: false,
             process_count: 0,
+            address: QString::default(),
+            token: QString::default(),
             generation: 0,
             stop: None,
             commands: None,
@@ -343,6 +368,11 @@ impl cxx_qt::Initialize for qobject::Monitor {
 impl qobject::Monitor {
     pub fn connect_to(mut self: Pin<&mut Self>, address: &QString, token: &QString) {
         self.as_mut().disconnect_from();
+        {
+            let mut rust = self.as_mut().rust_mut();
+            rust.address = address.clone();
+            rust.token = token.clone();
+        }
 
         let address = address.to_string().trim().to_owned();
         let mut token = token.to_string().trim().to_owned();
@@ -387,7 +417,18 @@ impl qobject::Monitor {
         }
         self.as_mut().clear_processes();
         self.as_mut().set_connected(false);
+        self.as_mut().set_fingerprint(QString::default());
         self.set_status(QString::from("Not connected"));
+    }
+
+    pub fn trust_fingerprint(self: Pin<&mut Self>, authority: &QString, fingerprint: &QString) {
+        if let Err(e) = tls::pin(&authority.to_string(), &fingerprint.to_string()) {
+            let message = format!("Could not remember the certificate: {e:#}");
+            self.action_failed(&QString::from(&message));
+            return;
+        }
+        let (address, token) = (self.rust().address.clone(), self.rust().token.clone());
+        self.connect_to(&address, &token);
     }
 
     pub fn send_signal(mut self: Pin<&mut Self>, pid: i32, signal: &QString) {
@@ -530,6 +571,7 @@ impl qobject::Monitor {
                 interval_ms,
                 uid,
                 history,
+                fingerprint,
             } => {
                 self.as_mut().rust_mut().metrics.clear();
                 for sample in &history {
@@ -540,6 +582,7 @@ impl qobject::Monitor {
                 }
                 self.as_mut().rust_mut().assets = AssetCache::for_host(&hostname);
                 self.as_mut().set_hostname(QString::from(&hostname));
+                self.as_mut().set_fingerprint(QString::from(&fingerprint));
                 self.as_mut().set_interval_ms(interval_ms as i32);
                 self.as_mut().set_uid(uid as i32);
                 self.as_mut().set_status(QString::from("Connected"));
@@ -606,6 +649,7 @@ impl qobject::Monitor {
             Event::Lost(reason) => {
                 self.as_mut().clear_processes();
                 self.as_mut().set_connected(false);
+                self.as_mut().set_fingerprint(QString::default());
                 self.set_status(QString::from(&format!(
                     "Connection lost ({reason}), retrying…"
                 )));
@@ -613,7 +657,25 @@ impl qobject::Monitor {
             Event::Rejected(reason) => {
                 self.as_mut().clear_processes();
                 self.as_mut().set_connected(false);
+                self.as_mut().set_fingerprint(QString::default());
                 self.set_status(QString::from(&format!("Rejected by daemon: {reason}")));
+            }
+            Event::Untrusted {
+                authority,
+                fingerprint,
+                pinned,
+            } => {
+                self.as_mut().clear_processes();
+                self.as_mut().set_connected(false);
+                self.as_mut().set_fingerprint(QString::default());
+                self.as_mut().set_status(QString::from(&format!(
+                    "Not connected: the certificate of {authority} isn't trusted"
+                )));
+                self.trust_requested(
+                    &QString::from(&authority),
+                    &QString::from(&fingerprint),
+                    &QString::from(pinned.as_deref().unwrap_or_default()),
+                );
             }
         }
     }

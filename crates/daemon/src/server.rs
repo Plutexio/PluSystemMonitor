@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,6 +12,8 @@ use plusysmon_protocol::{
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, error::RecvError};
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::error::{Error as WsError, ProtocolError};
@@ -42,12 +45,13 @@ pub struct Shared {
     pub assets: Assets,
 }
 
-pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
+pub async fn serve(listener: TcpListener, tls: TlsAcceptor, shared: Arc<Shared>) -> Result<()> {
     loop {
         let (stream, peer) = listener.accept().await?;
+        let tls = tls.clone();
         let shared = shared.clone();
         tokio::spawn(async move {
-            match handle(stream, peer, shared).await {
+            match handle(stream, peer, tls, shared).await {
                 Ok(()) => info!(%peer, "client disconnected"),
                 Err(e) => warn!(%peer, "client dropped: {e:#}"),
             }
@@ -55,16 +59,26 @@ pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
     }
 }
 
-type Socket = WebSocketStream<TcpStream>;
+type Socket = WebSocketStream<TlsStream<TcpStream>>;
 
 async fn send(ws: &mut Socket, msg: &ServerMsg) -> Result<()> {
     ws.send(Message::binary(proto::encode(msg))).await?;
     Ok(())
 }
 
-async fn handle(stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) -> Result<()> {
-    let mut ws = tokio_tungstenite::accept_async(stream)
+async fn handle(
+    stream: TcpStream,
+    peer: SocketAddr,
+    tls: TlsAcceptor,
+    shared: Arc<Shared>,
+) -> Result<()> {
+    let stream = tokio::time::timeout(HELLO_TIMEOUT, tls.accept(stream))
         .await
+        .context("TLS handshake timed out")?
+        .context("TLS handshake")?;
+    let mut ws = tokio::time::timeout(HELLO_TIMEOUT, tokio_tungstenite::accept_async(stream))
+        .await
+        .context("websocket handshake timed out")?
         .context("websocket handshake")?;
 
     let hello = tokio::time::timeout(HELLO_TIMEOUT, ws.next())
@@ -134,6 +148,10 @@ async fn handle(stream: TcpStream, peer: SocketAddr, shared: Arc<Shared>) -> Res
                     None | Some(Ok(Message::Close(_))) => return Ok(()),
                     // Clients that simply quit (or crash) don't send a close frame; that's normal.
                     Some(Err(WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake))) => {
+                        return Ok(());
+                    }
+                    // The same, as TLS sees it: no close_notify before the TCP close.
+                    Some(Err(WsError::Io(e))) if e.kind() == ErrorKind::UnexpectedEof => {
                         return Ok(());
                     }
                     Some(Err(e)) => return Err(e.into()),
