@@ -42,6 +42,19 @@ Run `./install.sh` again after pulling to update (it restarts the daemon).
 Other options: `--prefix /usr/local` (asks for sudo), `--no-service`,
 `--no-build`, `--uninstall` (keeps `~/.config/plusysmon`).
 
+On a server, clone the repository and install only the daemon:
+
+```sh
+./install.sh --daemon-only
+```
+
+This builds and installs nothing but `plusysmond` and its service, so it needs
+Rust and a C compiler but not Qt. It also runs `loginctl enable-linger`, as a
+user service would otherwise stop when you log out and not start at boot. The
+daemon still only listens on localhost until you add the `--listen` option above;
+the script's last lines say how. `./install.sh --daemon-only --uninstall` removes
+the daemon again and leaves linger on, since other services may rely on it.
+
 ### Remote machines
 
 ```sh
