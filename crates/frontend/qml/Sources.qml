@@ -47,6 +47,8 @@ QtObject {
             return "No game is running."
         if (source.id.startsWith("app."))
             return "It isn't running."
+        if (source.id.startsWith("virtual."))
+            return "Nothing is linked to it on this machine. Link a sensor under Sensors → Virtual."
         return "This machine doesn't report it."
     }
 

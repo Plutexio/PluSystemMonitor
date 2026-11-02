@@ -12,6 +12,7 @@ mod prefs;
 mod processes;
 mod theme;
 mod tls;
+mod virtual_sensors;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 

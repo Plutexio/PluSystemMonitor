@@ -59,6 +59,18 @@ Window {
         setPref("connection", Object.assign({}, connection, { recent: recent }))
     }
 
+    // Sources of the user's own, linked to real ones per machine (see
+    // virtual_sensors.rs). Saved right away; the file keeps what was accepted.
+    property var virtualSensors: JSON.parse(Config.virtualSensors())
+
+    function saveVirtualSensors(sensors) {
+        const kept = Config.saveVirtualSensors(JSON.stringify(sensors))
+        if (kept) {
+            virtualSensors = JSON.parse(kept)
+            monitor.setVirtualSensors(kept)
+        }
+    }
+
     function applyScheme() {
         Appearance.applyScheme(JSON.parse(Config.scheme(prefs.theme, wantsDark)))
     }
@@ -430,6 +442,8 @@ Window {
     SensorsDialog {
         id: sensorsDialog
         monitor: monitor
+        virtualSensors: window.virtualSensors
+        onVirtualSensorsEdited: sensors => window.saveVirtualSensors(sensors)
     }
 
     AppearanceDialog {
@@ -496,11 +510,12 @@ Window {
 
     Component.onCompleted: {
         applyScheme()
+        monitor.setVirtualSensors(JSON.stringify(virtualSensors))
         dashboard.load(Config.layout())
         monitor.connectTo(prefs.connection.address, prefs.connection.token)
     }
 
-    // `--open connection|sensors|updates|appearance`: open a dialog on start,
+    // `--open connection|sensors|virtual|updates|appearance`: open a dialog on start,
     // for screenshots of it.
     Timer {
         readonly property int flag: Qt.application.arguments.indexOf("--open")
@@ -508,8 +523,11 @@ Window {
         running: flag > 0 && flag + 1 < Qt.application.arguments.length
         interval: 1500
         onTriggered: {
-            const dialogs = { connection: connectionDialog, sensors: sensorsDialog, updates: updatesDialog, appearance: appearanceDialog }
-            dialogs[Qt.application.arguments[flag + 1]]?.open()
+            const dialogs = { connection: connectionDialog, sensors: sensorsDialog, virtual: sensorsDialog, updates: updatesDialog, appearance: appearanceDialog }
+            const name = Qt.application.arguments[flag + 1]
+            if (name === "virtual")
+                sensorsDialog.tab = 1
+            dialogs[name]?.open()
         }
     }
 

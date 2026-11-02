@@ -4,20 +4,22 @@
 //!
 //! Besides the machine itself there are sources per running app
 //! (`app.<app id>.gpu`) and for whichever game is running (`game.gpu`); those
-//! come from the process stream rather than from samples.
+//! come from the process stream rather than from samples. Virtual sensors
+//! (`virtual.<n>`, see `virtual_sensors`) take their values from other sources.
 
 use std::collections::{HashMap, VecDeque};
 
 use plusysmon_protocol::{AppKind, Sample, SensorKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::apps::App;
+use crate::virtual_sensors::{self, VirtualSensors};
 
 /// Points kept per source (two minutes at the default interval).
 pub const HISTORY_POINTS: usize = 120;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Unit {
     Percent,
@@ -64,6 +66,10 @@ pub struct Metrics {
     series: HashMap<String, Series>,
     ram_total: u64,
     vram_total: u64,
+    virtuals: VirtualSensors,
+    /// The connected machine's certificate fingerprint, which virtual
+    /// sensors are linked by.
+    machine: String,
 }
 
 struct Reading {
@@ -79,10 +85,20 @@ impl Metrics {
         self.series.clear();
     }
 
+    pub fn set_virtuals(&mut self, virtuals: VirtualSensors) {
+        self.virtuals = virtuals;
+    }
+
+    pub fn set_machine(&mut self, fingerprint: &str) {
+        self.machine = fingerprint.to_owned();
+    }
+
     pub fn record(&mut self, sample: &Sample) {
         self.ram_total = sample.mem.total;
         self.vram_total = sample.gpus.iter().map(|g| g.memory_total).sum();
-        let readings = read(sample);
+        let mut readings = read(sample);
+        let virtual_readings = self.read_virtuals(&readings);
+        readings.extend(virtual_readings);
         let system = std::mem::take(&mut self.system);
         self.system = self.apply(system, readings);
     }
@@ -139,17 +155,48 @@ impl Metrics {
         definitions
     }
 
+    /// The virtual sensors that have a linked source on this machine.
+    fn read_virtuals(&self, readings: &[Reading]) -> Vec<Reading> {
+        self.virtuals
+            .sensors
+            .iter()
+            .filter_map(|sensor| {
+                let found = sensor.resolve(&self.machine, |id| {
+                    let reading = readings.iter().find(|r| r.definition.id == id)?;
+                    (reading.definition.unit == sensor.unit).then_some(virtual_sensors::Value {
+                        value: reading.value,
+                        max: reading.max,
+                    })
+                })?;
+                Some(Reading {
+                    definition: virtual_definition(sensor),
+                    value: found.value,
+                    max: found.max,
+                })
+            })
+            .collect()
+    }
+
     /// Every source available right now, for the picker. The current-game
-    /// sources are always offered, so a game widget can be set up beforehand.
+    /// sources are always offered, so a game widget can be set up beforehand;
+    /// so are virtual sensors, which may only be linked on other machines.
     pub fn catalog(&self) -> String {
-        let placeholders: Vec<Definition> = if self.apps.iter().any(|d| d.id.starts_with("game.")) {
-            Vec::new()
-        } else {
-            GAME_SOURCES
+        let mut placeholders: Vec<Definition> =
+            if self.apps.iter().any(|d| d.id.starts_with("game.")) {
+                Vec::new()
+            } else {
+                GAME_SOURCES
+                    .iter()
+                    .filter_map(|(key, _)| game_placeholder(&format!("game.{key}")))
+                    .collect()
+            };
+        placeholders.extend(
+            self.virtuals
+                .sensors
                 .iter()
-                .filter_map(|(key, _)| game_placeholder(&format!("game.{key}")))
-                .collect()
-        };
+                .filter(|v| !self.system.iter().any(|d| d.id == v.id))
+                .map(virtual_definition),
+        );
         let all: Vec<&Definition> = self
             .system
             .iter()
@@ -167,7 +214,10 @@ impl Metrics {
         let Some((definition, series)) = current.zip(self.series.get(id)) else {
             // Without a game, its sources keep their generic names rather than
             // the last game's.
-            let placeholder = game_placeholder(id);
+            let placeholder = game_placeholder(id).or_else(|| {
+                let sensor = self.virtuals.sensors.iter().find(|v| v.id == id)?;
+                Some(virtual_definition(sensor))
+            });
             let definition = placeholder.as_ref().or_else(|| self.known.get(id))?;
             return Some(
                 json!({
@@ -207,6 +257,29 @@ impl Metrics {
             .get(id)
             .map(|s| s.history.iter().copied().collect())
             .unwrap_or_default()
+    }
+}
+
+fn virtual_definition(sensor: &virtual_sensors::VirtualSensor) -> Definition {
+    Definition {
+        id: sensor.id.clone(),
+        name: sensor.name.clone(),
+        category: "Virtual sensors".to_owned(),
+        unit: sensor.unit,
+        accent: unit_accent(sensor.unit),
+        app: None,
+    }
+}
+
+/// The colour sources of a unit are usually drawn in.
+fn unit_accent(unit: Unit) -> &'static str {
+    match unit {
+        Unit::Percent | Unit::Megahertz => "cpu",
+        Unit::Bytes | Unit::Rpm => "memory",
+        Unit::Celsius => "disk",
+        Unit::Watts => "gpu",
+        Unit::Volts => "network",
+        Unit::Amps => "swap",
     }
 }
 
@@ -718,6 +791,53 @@ mod tests {
         assert_eq!(game["available"], false);
         assert_eq!(game["name"], "Game GPU");
         assert!(metrics.history("app.steam:2.cpu").is_empty());
+    }
+
+    #[test]
+    fn virtual_sensors_follow_the_machine() {
+        use crate::virtual_sensors::{Binding, Mode, VirtualSensor};
+        let mut metrics = Metrics::default();
+        metrics.set_virtuals(VirtualSensors {
+            sensors: vec![VirtualSensor {
+                id: "virtual.1".into(),
+                name: "GPU heat".into(),
+                unit: Unit::Celsius,
+                mode: Mode::First,
+                bindings: vec![
+                    Binding {
+                        machine: "AA".into(),
+                        hostname: "desk".into(),
+                        sources: vec!["gpu.0.temperature".into()],
+                    },
+                    Binding {
+                        machine: "BB".into(),
+                        hostname: "server".into(),
+                        // Wrong unit: never used.
+                        sources: vec!["gpu.0.usage".into()],
+                    },
+                ],
+            }],
+        });
+
+        metrics.set_machine("AA");
+        metrics.record(&sample(10.0, 2000));
+        metrics.record(&sample(10.0, 2000));
+        let heat = get(&metrics, "virtual.1");
+        assert_eq!(heat["value"], 55.0);
+        assert_eq!(heat["max"], 100.0);
+        assert_eq!(heat["unit"], "celsius");
+        assert_eq!(heat["category"], "Virtual sensors");
+        assert_eq!(metrics.history("virtual.1"), [55.0, 55.0]);
+
+        // On a machine without a link it's still offered, but has no value.
+        metrics.clear();
+        metrics.set_machine("BB");
+        metrics.record(&sample(10.0, 2000));
+        let heat = get(&metrics, "virtual.1");
+        assert_eq!(heat["available"], false);
+        assert_eq!(heat["name"], "GPU heat");
+        let catalog: Vec<Value> = serde_json::from_str(&metrics.catalog()).unwrap();
+        assert!(catalog.iter().any(|d| d["id"] == "virtual.1"));
     }
 
     #[test]

@@ -293,6 +293,43 @@ offset = 0.0
 hidden = false
 ```
 
+### Virtual sensors
+
+When machines report the same thing through different sensors (the CPU
+voltage is `in0` on one board and `in1` on another), a widget pointing at
+one of them stays empty on the others. A **virtual sensor** fixes that: a
+source of your own (`virtual.1`, `virtual.2`, ...) under **Sensors → Virtual**,
+which widgets use like any other.
+
+- Make one from a source (its unit becomes the virtual sensor's), then name it.
+- On each machine, link the sources that measure the thing there; only sources
+  in the same unit can be linked. Links are per machine, told apart by
+  certificate fingerprint, so they survive address changes.
+- **On every other machine** holds links for machines without their own: each
+  uses the first of them it has. That's one setup for many alike servers.
+- With several sources linked, the mode combines them: first available,
+  average, highest, lowest or sum (e.g. "hottest drive").
+
+Virtual sensors belong to the app, like the layout, in
+`~/.config/plusysmon/virtual_sensors.toml`:
+
+```toml
+[[sensors]]
+id = "virtual.1"
+name = "CPU voltage"
+unit = "volts"
+mode = "first"
+
+[[sensors.bindings]]
+machine = "0B:10:77:…"       # plusysmond --fingerprint over there
+hostname = "desk"
+sources = ["sensor.it87.2624.in0"]
+
+[[sensors.bindings]]
+machine = ""                 # every other machine
+sources = ["sensor.nct6798.656.in1"]
+```
+
 Things to know:
 
 - **Motherboard voltages are raw.** Super I/O chips (it87, nct67xx, ...)

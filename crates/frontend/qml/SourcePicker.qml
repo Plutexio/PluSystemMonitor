@@ -10,13 +10,19 @@ StyledDialog {
     required property Monitor monitor
     /// IDs already chosen; shown but not pickable again.
     property var taken: []
+    /// Only sources in this unit ("" for any).
+    property string unit
+    /// Only the machine's own sources: no apps, games or virtual sensors.
+    property bool machineOnly: false
 
     signal picked(string id)
 
     readonly property var matches: {
         const query = search.text.trim().toLowerCase()
         return Sources.catalog(root.monitor).filter(source =>
-            !query || source.name.toLowerCase().includes(query) || source.category.toLowerCase().includes(query))
+            (!root.unit || source.unit === root.unit)
+            && (!root.machineOnly || !/^(app|game|virtual)\./.test(source.id))
+            && (!query || source.name.toLowerCase().includes(query) || source.category.toLowerCase().includes(query)))
     }
 
     headline: qsTr("Add a Source")

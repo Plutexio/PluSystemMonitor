@@ -61,6 +61,10 @@ pub mod qobject {
         #[qinvokable]
         fn save_sensor_settings(self: Pin<&mut Self>, json: &QString);
 
+        /// The virtual sensors to offer, as `Config.virtualSensors` gives them.
+        #[qinvokable]
+        fn set_virtual_sensors(self: Pin<&mut Self>, json: &QString);
+
         /// `{ settings, sensors: [readings as collected], error }`.
         #[qsignal]
         fn sensor_settings_received(self: Pin<&mut Self>, json: &QString);
@@ -315,6 +319,7 @@ use crate::client::{self, Command, Event};
 use crate::metrics::Metrics;
 use crate::processes::{self, Process, ProcessTable, Query};
 use crate::tls;
+use crate::virtual_sensors::VirtualSensors;
 
 pub struct MonitorRust {
     connected: bool,
@@ -446,6 +451,19 @@ impl qobject::Monitor {
         self.as_mut().set_daemon_version(0);
         self.as_mut().set_daemon_build(QString::default());
         self.set_incompatible(false);
+    }
+
+    pub fn set_virtual_sensors(mut self: Pin<&mut Self>, json: &QString) {
+        match serde_json::from_str::<VirtualSensors>(&json.to_string()) {
+            Ok(sensors) => {
+                self.as_mut().rust_mut().metrics.set_virtuals(sensors);
+                self.publish_metrics();
+            }
+            Err(e) => {
+                let message = format!("Malformed virtual sensors: {e}");
+                self.action_failed(&QString::from(&message));
+            }
+        }
     }
 
     pub fn request_sensor_settings(self: Pin<&mut Self>) -> bool {
@@ -626,6 +644,7 @@ impl qobject::Monitor {
                 ));
                 self.as_mut().set_incompatible(false);
                 self.as_mut().rust_mut().metrics.clear();
+                self.as_mut().rust_mut().metrics.set_machine(&fingerprint);
                 for sample in &history {
                     self.as_mut().rust_mut().metrics.record(sample);
                 }

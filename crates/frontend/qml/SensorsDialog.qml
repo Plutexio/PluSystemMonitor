@@ -10,6 +10,12 @@ StyledDialog {
     id: root
 
     required property Monitor monitor
+    /// 0: this machine's sensor settings (kept by its daemon); 1: virtual
+    /// sensors (kept by this app).
+    property int tab: 0
+    property var virtualSensors: ({ sensors: [] })
+
+    signal virtualSensorsEdited(var sensors)
 
     /// What the daemon reported: `{ settings, sensors, error }`.
     property bool loaded: false
@@ -27,8 +33,10 @@ StyledDialog {
     symbol: "sensors"
     iconShape: "clover4"
     preferredWidth: 760
-    body: qsTr("How %1 shows its sensors. This is kept on that machine, so every app connected to it sees the same, and one dashboard works on machines whose sensors are named differently.")
-          .arg(monitor.hostname || qsTr("this machine"))
+    body: tab === 0
+          ? qsTr("How %1 shows its sensors. This is kept on that machine, so every app connected to it sees the same, and one dashboard works on machines whose sensors are named differently.")
+            .arg(monitor.hostname || qsTr("this machine"))
+          : ""
 
     onAboutToShow: {
         loaded = false
@@ -208,195 +216,226 @@ StyledDialog {
         }
     }
 
-    StyledText {
+    SegmentedControl {
+        currentIndex: root.tab
+        segments: [
+            Segment { text: qsTr("This Machine"); symbol: "memory" },
+            Segment { text: qsTr("Virtual"); symbol: "hub" }
+        ]
+        onActivated: index => root.tab = index
+    }
+
+    Column {
         width: parent.width
-        visible: !root.supported
-        text: root.monitor.connected
-              ? qsTr("The daemon on this machine is too old for sensor settings. Update it under Updates.")
-              : qsTr("Not connected.")
-        color: Appearance.colors.error
-        wrapMode: Text.Wrap
-    }
+        visible: root.tab === 0
+        spacing: 12
 
-    LoadingSpinner {
-        anchors.horizontalCenter: parent.horizontalCenter
-        visible: root.supported && !root.loaded
-        running: visible
-    }
+        StyledText {
+            width: parent.width
+            visible: !root.supported
+            text: root.monitor.connected
+                  ? qsTr("The daemon on this machine is too old for sensor settings. Update it under Updates.")
+                  : qsTr("Not connected.")
+            color: Appearance.colors.error
+            wrapMode: Text.Wrap
+        }
 
-    StyledText {
-        width: parent.width
-        visible: root.error.length > 0
-        text: qsTr("Not saved: %1").arg(root.error)
-        color: Appearance.colors.error
-        wrapMode: Text.Wrap
-    }
+        LoadingSpinner {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: root.supported && !root.loaded
+            running: visible
+        }
 
-    Choice {
-        visible: root.loaded
-        label: qsTr("CPU Temperature")
-        note: qsTr("what widgets showing the CPU temperature use on this machine")
-        options: [{ id: "", name: qsTr("Automatic") }].concat(root.temperatures.map(s => ({ id: s.id, name: root.sensorName(s.id) })))
-        current: root.draft.cpu_temperature ?? ""
-        onChosen: id => root.setChoice("cpu_temperature", id)
-    }
+        StyledText {
+            width: parent.width
+            visible: root.error.length > 0
+            text: qsTr("Not saved: %1").arg(root.error)
+            color: Appearance.colors.error
+            wrapMode: Text.Wrap
+        }
 
-    Choice {
-        visible: root.loaded && root.powers.length > 0
-        label: qsTr("CPU Power")
-        note: qsTr("for boards that report the CPU's power as a sensor of their own")
-        options: [{ id: "", name: qsTr("Automatic") }].concat(root.powers.map(s => ({ id: s.id, name: root.sensorName(s.id) })))
-        current: root.draft.cpu_power ?? ""
-        onChosen: id => root.setChoice("cpu_power", id)
-    }
+        Choice {
+            visible: root.loaded
+            label: qsTr("CPU Temperature")
+            note: qsTr("what widgets showing the CPU temperature use on this machine")
+            options: [{ id: "", name: qsTr("Automatic") }].concat(root.temperatures.map(s => ({ id: s.id, name: root.sensorName(s.id) })))
+            current: root.draft.cpu_temperature ?? ""
+            onChosen: id => root.setChoice("cpu_temperature", id)
+        }
 
-    SectionLabel {
-        width: parent.width
-        visible: root.loaded
-        inset: 4
-        text: qsTr("Every Sensor")
-    }
+        Choice {
+            visible: root.loaded && root.powers.length > 0
+            label: qsTr("CPU Power")
+            note: qsTr("for boards that report the CPU's power as a sensor of their own")
+            options: [{ id: "", name: qsTr("Automatic") }].concat(root.powers.map(s => ({ id: s.id, name: root.sensorName(s.id) })))
+            current: root.draft.cpu_power ?? ""
+            onChosen: id => root.setChoice("cpu_power", id)
+        }
 
-    StyledText {
-        width: parent.width
-        visible: root.loaded
-        text: qsTr("a name of your own, and value × scale + offset: motherboards measure most voltages through dividers, so e.g. a 12 V rail may read 2 V until scaled")
-        color: Appearance.colors.onSurfaceVariant
-        font.pixelSize: Appearance.fontSize.smaller
-        wrapMode: Text.Wrap
-    }
-
-    ListView {
-        id: list
-
-        width: parent.width
-        height: Math.min(contentHeight, Math.max(160, root.maximumHeight - 520))
-        visible: root.loaded
-        clip: true
-        spacing: 2
-        boundsBehavior: Flickable.StopAtBounds
-        model: root.sensors
-        section.property: "device"
-        section.delegate: SectionLabel {
-            required property string section
-            width: list.width - 10
+        SectionLabel {
+            width: parent.width
+            visible: root.loaded
             inset: 4
-            text: section
+            text: qsTr("Every Sensor")
         }
 
-        T.ScrollBar.vertical: StyledScrollBar {}
+        StyledText {
+            width: parent.width
+            visible: root.loaded
+            text: qsTr("a name of your own, and value × scale + offset: motherboards measure most voltages through dividers, so e.g. a 12 V rail may read 2 V until scaled")
+            color: Appearance.colors.onSurfaceVariant
+            font.pixelSize: Appearance.fontSize.smaller
+            wrapMode: Text.Wrap
+        }
 
-        delegate: Item {
-            id: row
+        ListView {
+            id: list
 
-            required property var modelData
-            readonly property var setting: root.overrideOf(modelData.id)
-            readonly property real shown: modelData.value * setting.multiplier + setting.offset
+            width: parent.width
+            height: Math.min(contentHeight, Math.max(160, root.maximumHeight - 580))
+            visible: root.loaded
+            clip: true
+            spacing: 2
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.sensors
+            section.property: "device"
+            section.delegate: SectionLabel {
+                required property string section
+                width: list.width - 10
+                inset: 4
+                text: section
+            }
 
-            width: list.width - 10
-            height: 52
-            opacity: setting.hidden ? 0.55 : 1
+            T.ScrollBar.vertical: StyledScrollBar {}
 
-            Column {
-                anchors.left: parent.left
-                anchors.leftMargin: 4
-                anchors.right: nameField.left
-                anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 1
+            delegate: Item {
+                id: row
 
-                StyledText {
-                    width: parent.width
-                    text: row.modelData.label
-                    font.pixelSize: Appearance.fontSize.smallie
-                    elide: Text.ElideRight
+                required property var modelData
+                readonly property var setting: root.overrideOf(modelData.id)
+                readonly property real shown: modelData.value * setting.multiplier + setting.offset
+
+                width: list.width - 10
+                height: 52
+                opacity: setting.hidden ? 0.55 : 1
+
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 4
+                    anchors.right: nameField.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 1
+
+                    StyledText {
+                        width: parent.width
+                        text: row.modelData.label
+                        font.pixelSize: Appearance.fontSize.smallie
+                        elide: Text.ElideRight
+                    }
+                    StyledText {
+                        width: parent.width
+                        text: row.modelData.id
+                        color: Appearance.colors.onSurfaceVariant
+                        font.pixelSize: Appearance.fontSize.smaller
+                        elide: Text.ElideRight
+                    }
+                }
+
+                StyledTextField {
+                    id: nameField
+                    anchors.right: scaleField.left
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 180
+                    height: 44
+                    topPadding: 12
+                    bottomPadding: 12
+                    placeholderText: qsTr("Name")
+                    // Set once: a binding would fight the typing.
+                    Component.onCompleted: text = row.setting.label ?? ""
+                    onTextEdited: root.setOverride(row.modelData.id, "label", text.trim() || null)
+                }
+                StyledTextField {
+                    id: scaleField
+                    anchors.right: offsetField.left
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 76
+                    height: 44
+                    topPadding: 12
+                    bottomPadding: 12
+                    placeholderText: "× 1"
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    validator: DoubleValidator { notation: DoubleValidator.StandardNotation; locale: "C" }
+                    Component.onCompleted: text = row.setting.multiplier === 1 ? "" : String(row.setting.multiplier)
+                    onTextEdited: {
+                        const value = parseFloat(text)
+                        root.setOverride(row.modelData.id, "multiplier", isFinite(value) ? value : 1)
+                    }
+                }
+                StyledTextField {
+                    id: offsetField
+                    anchors.right: valueText.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 76
+                    height: 44
+                    topPadding: 12
+                    bottomPadding: 12
+                    placeholderText: "+ 0"
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    validator: DoubleValidator { notation: DoubleValidator.StandardNotation; locale: "C" }
+                    Component.onCompleted: text = row.setting.offset === 0 ? "" : String(row.setting.offset)
+                    onTextEdited: {
+                        const value = parseFloat(text)
+                        root.setOverride(row.modelData.id, "offset", isFinite(value) ? value : 0)
+                    }
                 }
                 StyledText {
-                    width: parent.width
-                    text: row.modelData.id
-                    color: Appearance.colors.onSurfaceVariant
+                    id: valueText
+                    anchors.right: hide.left
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 84
+                    horizontalAlignment: Text.AlignRight
+                    text: Format.metric(row.shown, root.unitOf(row.modelData.kind))
+                    font.family: Appearance.monoFontFamily
                     font.pixelSize: Appearance.fontSize.smaller
-                    elide: Text.ElideRight
                 }
-            }
-
-            StyledTextField {
-                id: nameField
-                anchors.right: scaleField.left
-                anchors.rightMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                width: 180
-                height: 44
-                topPadding: 12
-                bottomPadding: 12
-                placeholderText: qsTr("Name")
-                // Set once: a binding would fight the typing.
-                Component.onCompleted: text = row.setting.label ?? ""
-                onTextEdited: root.setOverride(row.modelData.id, "label", text.trim() || null)
-            }
-            StyledTextField {
-                id: scaleField
-                anchors.right: offsetField.left
-                anchors.rightMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                width: 76
-                height: 44
-                topPadding: 12
-                bottomPadding: 12
-                placeholderText: "× 1"
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                validator: DoubleValidator { notation: DoubleValidator.StandardNotation; locale: "C" }
-                Component.onCompleted: text = row.setting.multiplier === 1 ? "" : String(row.setting.multiplier)
-                onTextEdited: {
-                    const value = parseFloat(text)
-                    root.setOverride(row.modelData.id, "multiplier", isFinite(value) ? value : 1)
+                IconButton {
+                    id: hide
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: 36
+                    iconSize: 20
+                    symbol: row.setting.hidden ? "visibility_off" : "visibility"
+                    tooltip: row.setting.hidden ? qsTr("Hidden from the source list; click to show") : qsTr("Hide from the source list")
+                    onClicked: root.setOverride(row.modelData.id, "hidden", !row.setting.hidden)
                 }
-            }
-            StyledTextField {
-                id: offsetField
-                anchors.right: valueText.left
-                anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                width: 76
-                height: 44
-                topPadding: 12
-                bottomPadding: 12
-                placeholderText: "+ 0"
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                validator: DoubleValidator { notation: DoubleValidator.StandardNotation; locale: "C" }
-                Component.onCompleted: text = row.setting.offset === 0 ? "" : String(row.setting.offset)
-                onTextEdited: {
-                    const value = parseFloat(text)
-                    root.setOverride(row.modelData.id, "offset", isFinite(value) ? value : 0)
-                }
-            }
-            StyledText {
-                id: valueText
-                anchors.right: hide.left
-                anchors.rightMargin: 4
-                anchors.verticalCenter: parent.verticalCenter
-                width: 84
-                horizontalAlignment: Text.AlignRight
-                text: Format.metric(row.shown, root.unitOf(row.modelData.kind))
-                font.family: Appearance.monoFontFamily
-                font.pixelSize: Appearance.fontSize.smaller
-            }
-            IconButton {
-                id: hide
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                size: 36
-                iconSize: 20
-                symbol: row.setting.hidden ? "visibility_off" : "visibility"
-                tooltip: row.setting.hidden ? qsTr("Hidden from the source list; click to show") : qsTr("Hide from the source list")
-                onClicked: root.setOverride(row.modelData.id, "hidden", !row.setting.hidden)
             }
         }
+    }
+
+    VirtualSensorsPage {
+        width: parent.width
+        visible: root.tab === 1
+        monitor: root.monitor
+        sensors: root.virtualSensors
+        listHeight: Math.max(200, root.maximumHeight - 330)
+        onEdited: sensors => root.virtualSensorsEdited(sensors)
     }
 
     buttons: [
         TextButton {
             variant: TextButton.Filled
+            visible: root.tab === 1
+            text: qsTr("Done")
+            onClicked: root.close()
+        },
+        TextButton {
+            variant: TextButton.Filled
+            visible: root.tab === 0
             symbol: "save"
             text: qsTr("Save")
             enabled: root.loaded && !root.saving
@@ -408,6 +447,7 @@ StyledDialog {
         },
         TextButton {
             variant: TextButton.Text
+            visible: root.tab === 0
             text: qsTr("Cancel")
             onClicked: root.close()
         }

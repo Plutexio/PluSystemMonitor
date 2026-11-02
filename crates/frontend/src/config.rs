@@ -51,6 +51,14 @@ pub mod qobject {
         #[qinvokable]
         fn save_layout(self: Pin<&mut Self>, json: &QString);
 
+        /// `{ sensors: [{ id, name, unit, mode, bindings: [{ machine, hostname, sources }] }] }`
+        #[qinvokable]
+        fn virtual_sensors(self: Pin<&mut Self>) -> QString;
+
+        /// Saves them and returns them as kept (tidied up), or "" if refused.
+        #[qinvokable]
+        fn save_virtual_sensors(self: Pin<&mut Self>, json: &QString) -> QString;
+
         #[qsignal]
         fn error_occurred(self: Pin<&mut Self>, message: &QString);
 
@@ -76,6 +84,7 @@ use crate::layout::{self, Layout};
 use crate::paths;
 use crate::prefs::Prefs;
 use crate::theme;
+use crate::virtual_sensors::VirtualSensors;
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(700);
 
@@ -186,6 +195,45 @@ impl qobject::Config {
         let result = Layout::from_json(&json.to_string())
             .and_then(|layout| paths::write_atomic(&paths::layout_file()?, &layout.to_toml()));
         self.report(result);
+    }
+
+    pub fn virtual_sensors(self: Pin<&mut Self>) -> QString {
+        let loaded = paths::virtual_sensors_file().and_then(|path| match fs::read_to_string(&path) {
+            Ok(text) => toml::from_str::<VirtualSensors>(&text)
+                .map_err(anyhow::Error::from)
+                .and_then(|v| v.validated().map_err(anyhow::Error::msg))
+                .with_context(|| format!("{} can't be read", path.display())),
+            Err(_) => Ok(VirtualSensors::default()),
+        });
+        let sensors = match loaded {
+            Ok(sensors) => sensors,
+            Err(e) => {
+                self.report(Err(e));
+                VirtualSensors::default()
+            }
+        };
+        QString::from(&serde_json::to_string(&sensors).expect("virtual sensors serialize"))
+    }
+
+    pub fn save_virtual_sensors(self: Pin<&mut Self>, json: &QString) -> QString {
+        let result = (|| -> Result<VirtualSensors> {
+            let sensors: VirtualSensors = serde_json::from_str(&json.to_string())
+                .context("malformed virtual sensors")?;
+            let sensors = sensors.validated().map_err(anyhow::Error::msg)?;
+            let text = format!(
+                "# Virtual sensors and the sources each machine links to them, as set in PluSystemMonitor.\n{}",
+                toml::to_string_pretty(&sensors)?
+            );
+            paths::write_atomic(&paths::virtual_sensors_file()?, &text)?;
+            Ok(sensors)
+        })();
+        match result {
+            Ok(sensors) => QString::from(&serde_json::to_string(&sensors).expect("serializes")),
+            Err(e) => {
+                self.report(Err(e));
+                QString::default()
+            }
+        }
     }
 
     fn report(self: Pin<&mut Self>, result: Result<()>) {

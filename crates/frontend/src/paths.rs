@@ -21,6 +21,10 @@ pub fn prefs_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("frontend.toml"))
 }
 
+pub fn virtual_sensors_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("virtual_sensors.toml"))
+}
+
 pub fn known_daemons_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("known_daemons.toml"))
 }
