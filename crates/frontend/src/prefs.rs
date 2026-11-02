@@ -22,6 +22,9 @@ pub struct Prefs {
     pub sidebar_width: f64,
     /// The page shown last (0 overview, 1 apps, 2 processes), restored on start.
     pub page: u8,
+    /// Has the machines connected to before look for updates now and then.
+    /// Off, they only look when asked in the Updates dialog.
+    pub check_updates: bool,
     pub connection: Connection,
     pub apps: AppView,
     pub processes: ProcessView,
@@ -82,6 +85,7 @@ impl Default for Prefs {
             no_shapes: false,
             sidebar_width: 232.0,
             page: 0,
+            check_updates: true,
             connection: Connection::default(),
             apps: AppView::default(),
             processes: ProcessView::default(),
@@ -138,5 +142,6 @@ mod tests {
         let read: Prefs = toml::from_str("[connection]\naddress = \"box\"\n").unwrap();
         assert_eq!(read.connection.address, "box");
         assert!(read.connection.recent.is_empty());
+        assert!(read.check_updates);
     }
 }

@@ -38,9 +38,10 @@ systemctl --user edit plusysmond  # extra options, see below
 Environment="PLUSYSMOND_ARGS=--listen 0.0.0.0:7878"
 ```
 
-Run `./install.sh` again after pulling to update (it restarts the daemon).
-Other options: `--prefix /usr/local` (asks for sudo), `--no-service`,
-`--no-build`, `--uninstall` (keeps `~/.config/plusysmon`).
+Run `./install.sh` again after pulling to update (it restarts the daemon), or
+let the app do it, see [Updates](#updates). Other options: `--prefix /usr/local`
+(asks for sudo), `--no-service`, `--no-build`, `--no-updates`, `--uninstall`
+(keeps `~/.config/plusysmon`).
 
 On a server, clone the repository and install only the daemon:
 
@@ -83,6 +84,54 @@ self-signed certificate on first run (`~/.config/plusysmon/tls-cert.der` and
 The token is only sent after this check, so a machine you haven't accepted never
 sees it. Frontends and daemons from before encryption can't talk to current ones;
 update both.
+
+The Recent list shows whether each machine is up: a green dot when something
+answers at its address, red when nothing does (it looks again every 15 seconds
+while the dialog is open).
+
+## Updates
+
+**Updates** in the drawer lists every machine connected to before, what each
+runs (build, protocol version, CPU architecture) and whether upstream has
+something newer. A badge counts the machines with an update waiting. **Update**
+(or **Update All**) has a machine update itself from the git clone it was
+installed from:
+
+1. `git fetch` and a fast-forward to upstream (it refuses if the clone has
+   commits or changes of its own),
+2. `install.sh` again with the options it was installed with, at a lower
+   priority (building takes a while on a Raspberry Pi; the output shows under
+   the row),
+3. the daemon restarts into the new binary in place, so systemd doesn't notice,
+   and the dialog waits for it to come back.
+
+When this computer updates, the app is rebuilt too; the dialog then offers to
+restart it.
+
+It's all optional. Nothing updates unless asked in that dialog. "Look for
+Updates Automatically" (on by default) has the machines ask GitHub every few
+hours; off, they only look when you press Check Now. A machine installed with
+`./install.sh --no-updates` (remembered until `--updates`), or a daemon started
+with `--no-updates`, never updates itself and says so; update it however you
+like, or not at all.
+
+The daemon finds its clone through `<prefix>/share/plusysmon/install.conf`,
+which `install.sh` writes. A daemon that wasn't installed that way, or whose
+prefix needs root, can't update itself.
+
+### Versions and compatibility
+
+Daemons and frontends tell each other their protocol version and the oldest
+version they still work with. Additions keep older versions working (an older
+frontend simply doesn't see what's new); only changes that can't be made that
+way raise the oldest version, and then the older side shows that it's
+incompatible and **requires an update** instead of misbehaving. Updating keeps
+working across such a break: the hello, the daemon's info and the update
+messages never change.
+
+Daemons from before this (protocol 5) still work with current frontends, but
+can't update themselves: run `./install.sh` on them once by hand.
+`plusysmond --version` prints what a daemon speaks.
 
 ## Look and themes
 
@@ -217,12 +266,39 @@ read anything are left out. The Processor also gets `cpu.temperature`
 (package), `cpu.frequency` (average clock), `cpu.frequency_peak` (fastest
 core) and, when readable, `cpu.power`.
 
+On ARM boards (Raspberry Pi, Rockchip, ...) the CPU temperature comes from the
+SoC's thermal zone (`cpu_thermal`, `soc_thermal`, ...).
+
+### Per machine: Sensors
+
+**Sensors** in the drawer sets up the connected machine's sensors:
+
+- which sensor `cpu.temperature` (and `cpu.power`) comes from, for boards
+  where the automatic choice is wrong or missing, so one dashboard shows the
+  CPU temperature on every machine;
+- per sensor a name of its own, a scale and an offset (shown value =
+  raw × scale + offset), and whether it's listed as a source at all (a hidden
+  one can still feed `cpu.temperature`).
+
+The daemon keeps this in `~/.config/plusysmon/sensors.toml` on that machine,
+so every frontend connected to it sees the same names and values:
+
+```toml
+cpu_temperature = "thermal_zone0.temp1"
+
+[sensors."it87.2624.in3"]
+label = "+12V"
+multiplier = 6.0
+offset = 0.0
+hidden = false
+```
+
 Things to know:
 
 - **Motherboard voltages are raw.** Super I/O chips (it87, nct67xx, ...)
   measure most rails through resistor dividers the kernel doesn't know about,
-  so e.g. the 12 V rail may read about 2 V and most inputs are unnamed. Rename
-  a widget to what the input is on your board.
+  so e.g. the 12 V rail may read about 2 V and most inputs are unnamed. Name
+  and scale them under Sensors to what they are on your board.
 - **CPU power** comes from the RAPL energy counter, which only root can read
   (it leaks information through a power side channel, see PLATYPUS). Running
   the daemon as root shows it; so does making the file world-readable, e.g.
@@ -278,7 +354,12 @@ current machine's processes are grouped.
 ## Development
 
 - `cargo test` runs the parser, protocol, theme and layout tests.
-- `plusysmon --screenshot out.png` renders the window, saves it after 5 s and quits.
+- `plusysmon --screenshot out.png` renders the window, saves it after 5 s and
+  quits; `--open updates` (or `connection`, `sensors`, `appearance`) opens a
+  dialog first.
+- `PLUSYSMON_ADDRESS=host PLUSYSMON_TOKEN=… cargo test -p plusysmon live_probe
+  -- --ignored --nocapture` shows what the Updates dialog sees of a machine;
+  `live_update` updates it.
 - With stderr redirected, Qt logs to the journal instead; set
   `QT_FORCE_STDERR_LOGGING=1` to see QML warnings in the terminal.
 - Design tokens are in `crates/frontend/qml/design/Appearance.qml`; the colour

@@ -43,7 +43,27 @@ pub mod qobject {
         /// Set while something shows processes; the daemon only sends them then.
         #[qproperty(bool, processes_enabled, cxx_name = "processesEnabled")]
         #[qproperty(i32, process_count, cxx_name = "processCount")]
+        /// The protocol spoken with the daemon; 0 while not connected.
+        #[qproperty(i32, daemon_version, cxx_name = "daemonVersion")]
+        /// The daemon's build (git commit), when it says.
+        #[qproperty(QString, daemon_build, cxx_name = "daemonBuild")]
+        /// Set when the daemon and this app can't talk until one is updated.
+        #[qproperty(bool, incompatible)]
         type Monitor = super::MonitorRust;
+
+        /// Asks for the machine's sensor settings; `sensorSettingsReceived` answers.
+        /// Returns false when its daemon is too old to have them.
+        #[qinvokable]
+        fn request_sensor_settings(self: Pin<&mut Self>) -> bool;
+
+        /// Sends `{ cpu_temperature, cpu_power, sensors: { id: { label, multiplier,
+        /// offset, hidden } } }` to the daemon, which answers like a request.
+        #[qinvokable]
+        fn save_sensor_settings(self: Pin<&mut Self>, json: &QString);
+
+        /// `{ settings, sensors: [readings as collected], error }`.
+        #[qsignal]
+        fn sensor_settings_received(self: Pin<&mut Self>, json: &QString);
 
         /// An empty token for a local daemon is read from the daemon's token file.
         #[qinvokable]
@@ -308,6 +328,9 @@ pub struct MonitorRust {
     metric_catalog: QString,
     processes_enabled: bool,
     process_count: i32,
+    daemon_version: i32,
+    daemon_build: QString,
+    incompatible: bool,
 
     /// What was asked for last, to connect again once a certificate is trusted.
     address: QString,
@@ -335,6 +358,9 @@ impl Default for MonitorRust {
             metric_catalog: QString::from("[]"),
             processes_enabled: false,
             process_count: 0,
+            daemon_version: 0,
+            daemon_build: QString::default(),
+            incompatible: false,
             address: QString::default(),
             token: QString::default(),
             generation: 0,
@@ -375,13 +401,7 @@ impl qobject::Monitor {
         }
 
         let address = address.to_string().trim().to_owned();
-        let mut token = token.to_string().trim().to_owned();
-        if token.is_empty() && client::is_local(&address) {
-            token = plusysmon_protocol::token_path()
-                .and_then(|path| std::fs::read_to_string(path).ok())
-                .map(|t| t.trim().to_owned())
-                .unwrap_or_default();
-        }
+        let token = client::resolve_token(&address, &token.to_string());
 
         let stop = Arc::new(Notify::new());
         let (commands, command_rx) = mpsc::unbounded_channel();
@@ -416,9 +436,34 @@ impl qobject::Monitor {
             rust.generation += 1;
         }
         self.as_mut().clear_processes();
+        self.as_mut().set_disconnected();
+        self.set_status(QString::from("Not connected"));
+    }
+
+    fn set_disconnected(mut self: Pin<&mut Self>) {
         self.as_mut().set_connected(false);
         self.as_mut().set_fingerprint(QString::default());
-        self.set_status(QString::from("Not connected"));
+        self.as_mut().set_daemon_version(0);
+        self.as_mut().set_daemon_build(QString::default());
+        self.set_incompatible(false);
+    }
+
+    pub fn request_sensor_settings(self: Pin<&mut Self>) -> bool {
+        if !*self.connected() || *self.daemon_version() < plusysmon_protocol::INFO_SINCE as i32 {
+            return false;
+        }
+        self.command(Command::GetSensorSettings);
+        true
+    }
+
+    pub fn save_sensor_settings(self: Pin<&mut Self>, json: &QString) {
+        match serde_json::from_str::<plusysmon_protocol::SensorSettings>(&json.to_string()) {
+            Ok(settings) => self.command(Command::SetSensorSettings(settings)),
+            Err(e) => {
+                let message = format!("Malformed sensor settings: {e}");
+                self.action_failed(&QString::from(&message));
+            }
+        }
     }
 
     pub fn trust_fingerprint(self: Pin<&mut Self>, authority: &QString, fingerprint: &QString) {
@@ -572,7 +617,14 @@ impl qobject::Monitor {
                 uid,
                 history,
                 fingerprint,
+                version,
+                info,
             } => {
+                self.as_mut().set_daemon_version(version as i32);
+                self.as_mut().set_daemon_build(QString::from(
+                    info.as_ref().map_or("", |i| i.build.as_str()),
+                ));
+                self.as_mut().set_incompatible(false);
                 self.as_mut().rust_mut().metrics.clear();
                 for sample in &history {
                     self.as_mut().rust_mut().metrics.record(sample);
@@ -648,17 +700,35 @@ impl qobject::Monitor {
             Event::SignalResult { error: None, .. } => {}
             Event::Lost(reason) => {
                 self.as_mut().clear_processes();
-                self.as_mut().set_connected(false);
-                self.as_mut().set_fingerprint(QString::default());
+                self.as_mut().set_disconnected();
                 self.set_status(QString::from(&format!(
                     "Connection lost ({reason}), retrying…"
                 )));
             }
             Event::Rejected(reason) => {
                 self.as_mut().clear_processes();
-                self.as_mut().set_connected(false);
-                self.as_mut().set_fingerprint(QString::default());
+                self.as_mut().set_disconnected();
                 self.set_status(QString::from(&format!("Rejected by daemon: {reason}")));
+            }
+            Event::Incompatible(info) => {
+                self.as_mut().clear_processes();
+                self.as_mut().set_disconnected();
+                self.as_mut().set_hostname(QString::from(&info.hostname));
+                self.as_mut().set_incompatible(true);
+                let message = client::incompatibility(&info.hostname, info.version);
+                self.set_status(QString::from(&message));
+            }
+            Event::SensorSettings {
+                settings,
+                sensors,
+                error,
+            } => {
+                let json = json!({
+                    "settings": settings,
+                    "sensors": sensors,
+                    "error": error,
+                });
+                self.sensor_settings_received(&QString::from(&json.to_string()));
             }
             Event::Untrusted {
                 authority,
@@ -666,8 +736,7 @@ impl qobject::Monitor {
                 pinned,
             } => {
                 self.as_mut().clear_processes();
-                self.as_mut().set_connected(false);
-                self.as_mut().set_fingerprint(QString::default());
+                self.as_mut().set_disconnected();
                 self.as_mut().set_status(QString::from(&format!(
                     "Not connected: the certificate of {authority} isn't trusted"
                 )));

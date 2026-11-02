@@ -10,6 +10,7 @@ const SINGLETONS: &[&str] = &[
     "qml/Widgets.qml",
     "qml/Format.qml",
     "qml/Sources.qml",
+    "qml/Updates.qml",
 ];
 
 fn files_under(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
@@ -96,6 +97,6 @@ fn main() {
     CxxQtBuilder::new_qml_module(module)
         .qrc_resources(QResources::new().resource(QResource::new().files(scripts)).resource(shaders()))
         .qt_module("Quick")
-        .files(["src/monitor.rs", "src/config.rs"])
+        .files(["src/monitor.rs", "src/config.rs", "src/fleet.rs"])
         .build();
 }

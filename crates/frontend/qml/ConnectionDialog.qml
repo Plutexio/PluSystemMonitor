@@ -13,9 +13,14 @@ StyledDialog {
     property string currentAddress
     /// `{ address, token, hostname }`, latest first.
     property var recent: []
+    /// Probe results by address (see Fleet), for the online dots.
+    property var machineStatus: ({})
 
     signal connectRequested(string address, string token)
     signal forgetRequested(string address)
+    /// Look at the recent machines again; answers arrive in `machineStatus`.
+    signal probeRequested()
+    signal updatesRequested()
 
     function submit() {
         connectRequested(addressField.text.trim(), tokenField.text.trim())
@@ -26,6 +31,16 @@ StyledDialog {
     symbol: "lan"
     iconShape: "clover8"
     preferredWidth: 420
+
+    onAboutToShow: probeRequested()
+
+    // Machines come and go; keep the dots honest while the list is open.
+    Timer {
+        running: root.opened
+        interval: 15000
+        repeat: true
+        onTriggered: root.probeRequested()
+    }
 
     Row {
         width: parent.width
@@ -46,6 +61,14 @@ StyledDialog {
             color: Appearance.colors.onSurfaceVariant
             wrapMode: Text.Wrap
         }
+    }
+
+    TextButton {
+        visible: root.monitor.incompatible
+        variant: TextButton.Tonal
+        symbol: "system_update"
+        text: qsTr("Open Updates")
+        onClicked: root.updatesRequested()
     }
 
     Column {
@@ -96,6 +119,9 @@ StyledDialog {
 
             required property var modelData
             readonly property bool current: root.monitor.connected && modelData.address === root.currentAddress
+            readonly property var probe: root.machineStatus[modelData.address]
+            // Connected means up, whatever the last look said.
+            readonly property bool online: current || (probe?.online ?? false)
 
             width: recentList.width - (recentList.count > 4 ? 10 : 0)
             height: recentList.rowHeight
@@ -118,6 +144,39 @@ StyledDialog {
                     iconSize: 22
                     fill: row.current ? 1 : 0
                     color: row.current ? Appearance.colors.primary : Appearance.colors.onSurfaceVariant
+                }
+                // Up or down, as a presence badge on the icon; grey until known.
+                Rectangle {
+                    id: presence
+                    x: rowIcon.x + rowIcon.width - 8
+                    y: rowIcon.y + rowIcon.height - 8
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: Appearance.colors.surfaceContainerHigh
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: row.current || row.probe ? (row.online ? Appearance.colors.good : Appearance.colors.error)
+                                                        : Appearance.colors.outline
+
+                        Behavior on color {
+                            ElementMoveFastColor {}
+                        }
+                    }
+                    HoverHandler {
+                        id: presenceHover
+                    }
+                    StyledToolTip {
+                        visible: presenceHover.hovered
+                        text: row.current ? qsTr("Connected")
+                            : !row.probe ? qsTr("Looking…")
+                            : row.online ? (row.probe.state === "online" ? qsTr("Online") : qsTr("Online, but: %1").arg(Updates.describe(row.probe, null, 0).text))
+                            : qsTr("Offline")
+                    }
                 }
                 Column {
                     anchors.left: rowIcon.right

@@ -245,7 +245,15 @@ fn is_cpu_package(driver: &str, label: &str) -> bool {
     matches!(
         (driver, label),
         ("coretemp", "Package") | ("k10temp" | "zenpower", "Tctl" | "Tdie")
-    )
+    ) || is_soc_thermal(driver)
+}
+
+/// ARM boards (Raspberry Pi, Rockchip, Amlogic, ...) report the SoC's
+/// temperature through a thermal zone named after the CPU: `cpu_thermal`,
+/// `cpu-thermal`, `soc_thermal`, `cpu0_thermal`, ...
+fn is_soc_thermal(driver: &str) -> bool {
+    let d = driver.to_ascii_lowercase();
+    d.contains("thermal") && (d.starts_with("cpu") || d.starts_with("soc"))
 }
 
 /// What a chip belongs to, in words a user recognises.
@@ -255,6 +263,7 @@ fn device_name(driver: &str, model: Option<&str>) -> String {
     ];
     match driver {
         "coretemp" | "k10temp" | "zenpower" => "CPU".to_owned(),
+        d if is_soc_thermal(d) => "CPU".to_owned(),
         "nvme" => model.map_or_else(|| "NVMe drive".to_owned(), |m| format!("NVMe {m}")),
         "drivetemp" => model.map_or_else(|| "Drive".to_owned(), |m| format!("Drive {m}")),
         "acpitz" => "ACPI".to_owned(),
@@ -371,6 +380,17 @@ mod tests {
         );
         assert_eq!(device_name("r8169_0_500:00", None), "Network adapter");
         assert_eq!(device_name("something_new", None), "something_new");
+        assert_eq!(device_name("cpu_thermal", None), "CPU");
+    }
+
+    #[test]
+    fn finds_the_cpu_on_arm_boards() {
+        for driver in ["cpu_thermal", "cpu-thermal", "soc_thermal", "cpu0_thermal"] {
+            assert!(is_cpu_package(driver, "Temperature 1"), "{driver}");
+        }
+        assert!(!is_cpu_package("gpu_thermal", "Temperature 1"));
+        assert!(!is_cpu_package("acpitz", "Temperature 1"));
+        assert!(!is_cpu_package("coretemp", "Core 0"));
     }
 
     #[test]

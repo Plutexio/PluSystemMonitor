@@ -17,6 +17,9 @@ Options:
                    only the daemon.
   --no-build       Install what is already in target/release
   --no-service     Don't enable and start the daemon's systemd user service
+  --no-updates     Don't let frontends update this machine (pull, build, install
+                   from this clone). Remembered until --updates turns it on again.
+  --updates        Allow that again (the default)
   --uninstall      Remove everything this script installed (keeps ~/.config/plusysmon)
   -h, --help       Print this help
 EOF
@@ -27,6 +30,7 @@ build=1
 service=1
 uninstall=0
 daemon_only=0
+updates=""
 while (($#)); do
     case "$1" in
         --prefix) prefix="${2:?--prefix needs a value}"; shift ;;
@@ -34,6 +38,8 @@ while (($#)); do
         --no-build) build=0 ;;
         --no-service) service=0 ;;
         --daemon-only) daemon_only=1 ;;
+        --no-updates) updates=0 ;;
+        --updates) updates=1 ;;
         --uninstall) uninstall=1 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
@@ -48,6 +54,8 @@ appdir="$prefix/share/applications"
 icondir="$prefix/share/icons/hicolor/scalable/apps"
 unitdir="$prefix/share/systemd/user"  # in systemd's user unit search path for ~/.local, /usr/local and /usr
 fontdir="$prefix/share/plusysmon/fonts"
+# Tells the daemon where it came from, so it can update itself when asked.
+record="$prefix/share/plusysmon/install.conf"
 
 say() { printf '\033[1;35m::\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -84,7 +92,7 @@ if ((uninstall)); then
         systemctl --user disable --now plusysmond.service || true
     fi
     say "Removing files from $prefix"
-    "${sudo[@]}" rm -f "$bindir/plusysmond" "$unitdir/plusysmond.service"
+    "${sudo[@]}" rm -f "$bindir/plusysmond" "$unitdir/plusysmond.service" "$record"
     if ((user_systemd)); then
         systemctl --user daemon-reload
     fi
@@ -127,6 +135,24 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 sed "s|@BINDIR@|$bindir|g" "$src/packaging/plusysmond.service" >"$tmp/plusysmond.service"
 "${sudo[@]}" install -Dm644 "$tmp/plusysmond.service" "$unitdir/plusysmond.service"
+
+# An earlier --no-updates stands until --updates says otherwise.
+if [[ -z "$updates" ]]; then
+    updates=1
+    if [[ -f "$record" ]] && grep -qx 'updates=0' "$record"; then
+        updates=0
+    fi
+fi
+cat >"$tmp/install.conf" <<EOF
+# Written by install.sh. plusysmond reads it to update itself from this clone
+# when a frontend asks: git pull, then install.sh again with these options.
+source=$src
+prefix=$prefix
+daemon_only=$daemon_only
+updates=$updates
+path=$PATH
+EOF
+"${sudo[@]}" install -Dm644 "$tmp/install.conf" "$record"
 
 # The interface's two faces, unless the system has them: Google Sans Flex for
 # text and Material Symbols Rounded for icons. Pinned like Swiftify pins them.

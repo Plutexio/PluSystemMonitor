@@ -32,11 +32,25 @@ Window {
     }
 
     // Called once connected, so the list only holds machines that worked.
+    // It is also the list of machines the Updates dialog looks after.
     function rememberConnection() {
         const connection = prefs.connection
         const others = connection.recent.filter(entry => entry.address !== connection.address)
         const latest = { address: connection.address, token: connection.token, hostname: monitor.hostname }
-        setPref("connection", Object.assign({}, connection, { recent: [latest, ...others].slice(0, 8) }))
+        setPref("connection", Object.assign({}, connection, { recent: [latest, ...others].slice(0, 64) }))
+    }
+
+    /// Every machine connected to before, the current one included.
+    function machines() {
+        const connection = prefs.connection
+        const list = connection.recent.map(entry => ({ address: entry.address, token: entry.token, hostname: entry.hostname }))
+        if (!list.some(entry => entry.address === connection.address))
+            list.unshift({ address: connection.address, token: connection.token, hostname: "" })
+        return list
+    }
+
+    function probeMachines(check) {
+        fleet.probe(JSON.stringify(machines()), check)
     }
 
     function forgetConnection(address) {
@@ -105,6 +119,54 @@ Window {
         processesEnabled: window.page !== 0 || dashboard.usesProcesses
     }
 
+    // What the other machines are up to: reachable or not, their versions
+    // and updates, keyed by address.
+    property var machineStatus: ({})
+    property var updateProgress: ({})
+    readonly property int updatesAvailable: {
+        let count = 0
+        for (const address in machineStatus) {
+            if (Updates.updatable(machineStatus[address], updateProgress[address]))
+                count++
+        }
+        return count
+    }
+
+    Fleet {
+        id: fleet
+
+        onProbed: (address, json) => {
+            window.machineStatus = Object.assign({}, window.machineStatus, { [address]: JSON.parse(json) })
+        }
+        onUpdateEvent: (address, json) => {
+            const event = JSON.parse(json)
+            const before = window.updateProgress[address] ?? { state: "", lines: [], error: "" }
+            const after = {
+                state: event.state ?? before.state,
+                lines: event.line ? [...before.lines, event.line].slice(-200) : before.lines,
+                error: event.error ?? before.error
+            }
+            window.updateProgress = Object.assign({}, window.updateProgress, { [address]: after })
+            // A daemon that refused us for its age speaks again once updated.
+            if (event.state === "done" && address === window.prefs.connection.address && !monitor.connected)
+                monitor.connectTo(address, window.prefs.connection.token)
+        }
+    }
+
+    // Looking for updates in the background, unless that's turned off.
+    Timer {
+        running: window.prefs.check_updates ?? true
+        interval: 6 * 3600 * 1000
+        repeat: true
+        triggeredOnStart: false
+        onTriggered: window.probeMachines(true)
+    }
+    Timer {
+        running: true
+        interval: 8000
+        onTriggered: window.probeMachines(window.prefs.check_updates ?? true)
+    }
+
     // The window itself: layer0, rounded unless maximised.
     Rectangle {
         id: frame
@@ -127,8 +189,11 @@ Window {
             page: window.page
             preferredWidth: window.prefs.sidebar_width ?? Appearance.sizes.sidebarWidth
             onPageRequested: index => window.page = index
+            updatesAvailable: window.updatesAvailable
             onConnectionRequested: connectionDialog.open()
             onAppearanceRequested: appearanceDialog.open()
+            onSensorsRequested: sensorsDialog.open()
+            onUpdatesRequested: updatesDialog.open()
             onWidthEdited: width => window.setPref("sidebar_width", width)
         }
 
@@ -327,6 +392,12 @@ Window {
         token: window.prefs.connection.token
         currentAddress: window.prefs.connection.address
         recent: window.prefs.connection.recent
+        machineStatus: window.machineStatus
+        onProbeRequested: window.probeMachines(false)
+        onUpdatesRequested: {
+            close()
+            updatesDialog.open()
+        }
         onConnectRequested: (address, token) => {
             window.setPref("connection", Object.assign({}, window.prefs.connection, { address: address, token: token }))
             monitor.connectTo(address, token)
@@ -337,6 +408,28 @@ Window {
     TrustDialog {
         id: trustDialog
         onTrusted: (authority, fingerprint) => monitor.trustFingerprint(authority, fingerprint)
+    }
+
+    UpdatesDialog {
+        id: updatesDialog
+        monitor: monitor
+        fleet: fleet
+        machines: window.machines()
+        machineStatus: window.machineStatus
+        updateProgress: window.updateProgress
+        checkUpdates: window.prefs.check_updates ?? true
+        onCheckUpdatesEdited: value => window.setPref("check_updates", value)
+        onCheckRequested: window.probeMachines(true)
+        onLookRequested: window.probeMachines(window.prefs.check_updates ?? true)
+        onUpdateRequested: (address, token) => {
+            window.updateProgress = Object.assign({}, window.updateProgress, { [address]: { state: "starting", lines: [], error: "" } })
+            fleet.update(address, token)
+        }
+    }
+
+    SensorsDialog {
+        id: sensorsDialog
+        monitor: monitor
     }
 
     AppearanceDialog {
@@ -363,6 +456,10 @@ Window {
         }
         function onTrustRequested(authority, fingerprint, previous) {
             trustDialog.ask(authority, fingerprint, previous)
+        }
+        function onIncompatibleChanged() {
+            if (monitor.incompatible)
+                snackbar.show(monitor.status)
         }
     }
 
@@ -401,6 +498,19 @@ Window {
         applyScheme()
         dashboard.load(Config.layout())
         monitor.connectTo(prefs.connection.address, prefs.connection.token)
+    }
+
+    // `--open connection|sensors|updates|appearance`: open a dialog on start,
+    // for screenshots of it.
+    Timer {
+        readonly property int flag: Qt.application.arguments.indexOf("--open")
+
+        running: flag > 0 && flag + 1 < Qt.application.arguments.length
+        interval: 1500
+        onTriggered: {
+            const dialogs = { connection: connectionDialog, sensors: sensorsDialog, updates: updatesDialog, appearance: appearanceDialog }
+            dialogs[Qt.application.arguments[flag + 1]]?.open()
+        }
     }
 
     // `--screenshot <file.png>`: let data and animations settle, save the window, quit.

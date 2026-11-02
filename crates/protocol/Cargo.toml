@@ -9,3 +9,6 @@ rmp-serde.workspace = true
 serde_bytes.workspace = true
 serde.workspace = true
 sha2.workspace = true
+
+[dev-dependencies]
+toml.workspace = true

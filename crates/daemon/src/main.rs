@@ -3,6 +3,7 @@ mod server;
 mod table;
 mod tls;
 mod token;
+mod update;
 
 use std::collections::VecDeque;
 use std::io::IsTerminal;
@@ -12,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use plusysmon_protocol::DEFAULT_PORT;
+use plusysmon_protocol::{DEFAULT_PORT, SensorSettings};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -25,8 +26,11 @@ Options:
                          Use 0.0.0.0:7878 to accept connections from other machines.
   --interval-ms <MS>     Sampling interval [default: 1000]
   --history-secs <SECS>  How much history to keep for new clients [default: 1800]
+  --no-updates           Don't update from the git clone install.sh ran from, even
+                         when a frontend asks (install.sh --no-updates does the same)
   --fingerprint          Print the TLS certificate's fingerprint, the one frontends
                          ask you to compare when first connecting, and exit
+  --version              Print the protocol version and build, and exit
   -h, --help             Print this help";
 
 struct Args {
@@ -34,6 +38,7 @@ struct Args {
     interval_ms: u32,
     history_secs: u32,
     print_fingerprint: bool,
+    no_updates: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -42,6 +47,7 @@ fn parse_args() -> Result<Args> {
         interval_ms: 1000,
         history_secs: 1800,
         print_fingerprint: false,
+        no_updates: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -51,6 +57,16 @@ fn parse_args() -> Result<Args> {
             "--interval-ms" => args.interval_ms = value()?.parse().context("--interval-ms")?,
             "--history-secs" => args.history_secs = value()?.parse().context("--history-secs")?,
             "--fingerprint" => args.print_fingerprint = true,
+            "--no-updates" => args.no_updates = true,
+            "--version" => {
+                println!(
+                    "plusysmond protocol {} (works with {} and newer), build {}",
+                    plusysmon_protocol::PROTOCOL_VERSION,
+                    plusysmon_protocol::OLDEST_COMPATIBLE,
+                    plusysmon_protocol::BUILD_COMMIT
+                );
+                std::process::exit(0);
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -87,6 +103,12 @@ fn main() -> Result<()> {
         .map(|h| h.trim().to_owned())
         .unwrap_or_else(|_| "unknown".to_owned());
     let capacity = (args.history_secs as usize * 1000 / args.interval_ms as usize).max(1);
+    info!(
+        "protocol {}, build {}",
+        plusysmon_protocol::PROTOCOL_VERSION,
+        plusysmon_protocol::BUILD_COMMIT
+    );
+    let sensor_settings = load_sensor_settings();
 
     let shared = Arc::new(server::Shared {
         hostname,
@@ -100,6 +122,9 @@ fn main() -> Result<()> {
         assets: collect::Assets::default(),
         process_updates: broadcast::channel(16).0,
         process_subscribers: AtomicUsize::new(0),
+        sensor_settings: Mutex::new(sensor_settings),
+        raw_sensors: Mutex::default(),
+        updater: update::Updater::new(args.no_updates),
     });
 
     tokio::runtime::Builder::new_current_thread()
@@ -138,13 +163,14 @@ async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: 
 
     loop {
         ticker.tick().await;
-        let sample = match collector.sample() {
+        let mut sample = match collector.sample() {
             Ok(s) => s,
             Err(e) => {
                 warn!("sampling failed: {e:#}");
                 continue;
             }
         };
+        apply_sensor_settings(&shared, &mut sample);
         let mut history = shared.history.lock().unwrap();
         if history.len() == capacity {
             history.pop_front();
@@ -167,6 +193,46 @@ async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: 
             shared.processes.lock().unwrap().clear();
         }
     }
+}
+
+/// The machine's own sensor names, scales and CPU sources. A broken file is
+/// reported and ignored, never fatal.
+fn load_sensor_settings() -> SensorSettings {
+    let Some(path) = plusysmon_protocol::sensor_settings_path() else {
+        return SensorSettings::default();
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return SensorSettings::default();
+    };
+    match toml::from_str::<SensorSettings>(&text)
+        .map_err(|e| e.to_string())
+        .and_then(SensorSettings::validated)
+    {
+        Ok(settings) => {
+            info!("sensor settings: {}", path.display());
+            settings
+        }
+        Err(e) => {
+            warn!("ignoring {}: {e}", path.display());
+            SensorSettings::default()
+        }
+    }
+}
+
+/// Keeps the readings as collected for setting things up, and sends them
+/// on as the settings say.
+fn apply_sensor_settings(shared: &server::Shared, sample: &mut plusysmon_protocol::Sample) {
+    let raw = std::mem::take(&mut sample.sensors);
+    let (shown, temperature, power) = shared.sensor_settings.lock().unwrap().apply(&raw);
+    sample.sensors = shown;
+    // A chosen sensor that went away leaves what was found automatically.
+    if temperature.is_some() {
+        sample.cpu.temperature = temperature;
+    }
+    if power.is_some() {
+        sample.cpu.power = power;
+    }
+    *shared.raw_sensors.lock().unwrap() = raw;
 }
 
 async fn shutdown_signal() {

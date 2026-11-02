@@ -3,6 +3,7 @@ mod apps;
 mod assets;
 mod client;
 mod config;
+mod fleet;
 mod layout;
 mod metrics;
 mod monitor;

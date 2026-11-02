@@ -1092,6 +1092,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "sha2",
+ "toml",
 ]
 
 [[package]]
@@ -1107,6 +1108,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

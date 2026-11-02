@@ -8,7 +8,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
 use plusysmon_protocol::{
-    self as proto, ClientMsg, PROTOCOL_VERSION, ProcessUpdate, Sample, ServerMsg, Signal,
+    self as proto, ClientMsg, DaemonInfo, INFO_SINCE, OLDEST_COMPATIBLE, PROTOCOL_VERSION,
+    ProcessUpdate, Sample, SensorReading, SensorSettings, ServerMsg, Signal,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{self, error::RecvError};
@@ -22,6 +23,7 @@ use tracing::{info, warn};
 use crate::collect::Assets;
 use crate::table::ProcessTable;
 use crate::token;
+use crate::update::{UpdateEvent, Updater};
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 /// Icons and artwork are small; anything bigger is not what we registered.
@@ -43,6 +45,10 @@ pub struct Shared {
     pub process_subscribers: AtomicUsize,
     /// Files clients may fetch, registered while describing apps.
     pub assets: Assets,
+    pub sensor_settings: Mutex<SensorSettings>,
+    /// The latest sensor readings before the settings were applied.
+    pub raw_sensors: Mutex<Vec<SensorReading>>,
+    pub updater: Arc<Updater>,
 }
 
 pub async fn serve(listener: TcpListener, tls: TlsAcceptor, shared: Arc<Shared>) -> Result<()> {
@@ -88,46 +94,75 @@ async fn handle(
     let Message::Binary(bytes) = hello else {
         bail!("expected a binary hello frame")
     };
-    let ClientMsg::Hello { version, token } = proto::decode(&bytes).context("malformed hello")?
+    let ClientMsg::Hello {
+        version,
+        token,
+        oldest,
+        probe,
+    } = proto::decode(&bytes).context("malformed hello")?
     else {
         bail!("expected hello as the first message");
     };
 
-    let rejection = if version != PROTOCOL_VERSION {
-        Some(format!(
-            "protocol version mismatch: daemon {PROTOCOL_VERSION}, client {version}"
-        ))
-    } else if !token::matches(&shared.token, &token) {
-        Some("invalid token".to_owned())
-    } else {
-        None
-    };
-    if let Some(reason) = rejection {
+    if !token::matches(&shared.token, &token) {
+        let reason = "invalid token".to_owned();
         send(&mut ws, &ServerMsg::Error(reason.clone())).await.ok();
         ws.close(None).await.ok();
         bail!("rejected: {reason}");
     }
+    let compatible = proto::compatible(version, oldest, PROTOCOL_VERSION, OLDEST_COMPATIBLE);
+    // Clients from before Info only understand an error. Its wording is what
+    // version 6 frontends look for to fall back to an older daemon's protocol.
+    if version < INFO_SINCE && !compatible {
+        let reason =
+            format!("protocol version mismatch: daemon {PROTOCOL_VERSION}, client {version}");
+        send(&mut ws, &ServerMsg::Error(reason.clone())).await.ok();
+        ws.close(None).await.ok();
+        bail!("rejected: {reason}");
+    }
+    let knows_info = version >= INFO_SINCE;
+    if knows_info {
+        let info = DaemonInfo {
+            hostname: shared.hostname.clone(),
+            version: PROTOCOL_VERSION,
+            oldest_compatible: OLDEST_COMPATIBLE,
+            build: proto::BUILD_COMMIT.to_owned(),
+            arch: std::env::consts::ARCH.to_owned(),
+            compatible,
+            updates: shared.updater.status(),
+        };
+        send(&mut ws, &ServerMsg::Info(info)).await?;
+    }
+    // Probes, and clients too old or too new for us, can only ask about updates.
+    let streaming = compatible && !probe;
+    let mut updates = knows_info.then(|| shared.updater.subscribe());
 
-    let (mut samples, history) = {
-        let history = shared.history.lock().unwrap();
-        (
-            shared.samples.subscribe(),
-            history.iter().cloned().collect(),
-        )
-    };
-    info!(%peer, "client connected");
-    let welcome = ServerMsg::Welcome {
-        hostname: shared.hostname.clone(),
-        interval_ms: shared.interval_ms,
-        uid: shared.uid,
-        history,
-    };
-    send(&mut ws, &welcome).await?;
+    let mut samples = None;
+    if streaming {
+        let (receiver, history) = {
+            let history = shared.history.lock().unwrap();
+            (
+                shared.samples.subscribe(),
+                history.iter().cloned().collect(),
+            )
+        };
+        samples = Some(receiver);
+        info!(%peer, version, "client connected");
+        let welcome = ServerMsg::Welcome {
+            hostname: shared.hostname.clone(),
+            interval_ms: shared.interval_ms,
+            uid: shared.uid,
+            history,
+        };
+        send(&mut ws, &welcome).await?;
+    } else if !probe {
+        info!(%peer, version, oldest, "incompatible client connected; it may only update");
+    }
 
     let mut processes: Option<ProcessSubscription> = None;
     loop {
         tokio::select! {
-            sample = samples.recv() => match sample {
+            sample = recv_or_wait(&mut samples) => match sample {
                 Ok(sample) => send(&mut ws, &ServerMsg::Sample(sample)).await?,
                 // A slow client just skips samples; the next one is a full snapshot anyway.
                 Err(RecvError::Lagged(_)) => continue,
@@ -140,6 +175,15 @@ async fn handle(
                     let (subscription, snapshot) = ProcessSubscription::start(&shared);
                     processes = Some(subscription);
                     send(&mut ws, &ServerMsg::Processes(snapshot)).await?;
+                }
+                Err(RecvError::Closed) => return Ok(()),
+            },
+            event = recv_or_wait(&mut updates) => match event {
+                Ok(UpdateEvent::Status(status)) => send(&mut ws, &ServerMsg::Updates(status)).await?,
+                Ok(UpdateEvent::Log(line)) => send(&mut ws, &ServerMsg::UpdateLog(line)).await?,
+                // Missed lines of build output aren't worth dropping the client for.
+                Err(RecvError::Lagged(_)) => {
+                    send(&mut ws, &ServerMsg::Updates(shared.updater.status())).await?;
                 }
                 Err(RecvError::Closed) => return Ok(()),
             },
@@ -159,8 +203,31 @@ async fn handle(
                     // Pings are answered by tungstenite itself.
                     Some(Ok(_)) => continue,
                 };
-                match proto::decode(&bytes).context("malformed message")? {
+                let msg = match proto::decode(&bytes) {
+                    Ok(msg) => msg,
+                    // A client newer than us may know messages we don't.
+                    Err(e) if !streaming || version > PROTOCOL_VERSION => {
+                        warn!(%peer, "ignoring a message: {e}");
+                        continue;
+                    }
+                    Err(e) => return Err(e).context("malformed message"),
+                };
+                match msg {
                     ClientMsg::Hello { .. } => bail!("unexpected second hello"),
+                    ClientMsg::CheckUpdates if knows_info => {
+                        if !shared.updater.check() {
+                            send(&mut ws, &ServerMsg::Updates(shared.updater.status())).await?;
+                        }
+                    }
+                    ClientMsg::Update if knows_info => {
+                        info!(%peer, "update requested");
+                        if !shared.updater.start() {
+                            send(&mut ws, &ServerMsg::Updates(shared.updater.status())).await?;
+                        }
+                    }
+                    // The rest needs a client that speaks our language.
+                    _ if !streaming => {}
+                    ClientMsg::CheckUpdates | ClientMsg::Update => {}
                     ClientMsg::Subscribe { processes: wanted } => {
                         if wanted && processes.is_none() {
                             let (subscription, snapshot) = ProcessSubscription::start(&shared);
@@ -179,9 +246,57 @@ async fn handle(
                         info!(%peer, pid, ?signal, error = error.as_deref().unwrap_or("none"), "signal");
                         send(&mut ws, &ServerMsg::SignalResult { pid, signal, error }).await?;
                     }
+                    ClientMsg::GetSensorSettings => {
+                        send(&mut ws, &sensor_settings_msg(&shared, None)).await?;
+                    }
+                    ClientMsg::SetSensorSettings(settings) => {
+                        let error = match store_sensor_settings(&shared, settings) {
+                            Ok(()) => {
+                                info!(%peer, "sensor settings changed");
+                                None
+                            }
+                            Err(e) => {
+                                warn!(%peer, "sensor settings refused: {e:#}");
+                                Some(format!("{e:#}"))
+                            }
+                        };
+                        send(&mut ws, &sensor_settings_msg(&shared, error)).await?;
+                    }
                 }
             }
         }
+    }
+}
+
+fn sensor_settings_msg(shared: &Shared, error: Option<String>) -> ServerMsg {
+    ServerMsg::SensorSettings {
+        settings: shared.sensor_settings.lock().unwrap().clone(),
+        sensors: shared.raw_sensors.lock().unwrap().clone(),
+        error,
+    }
+}
+
+/// Saves first: settings only take effect once they'd survive a restart.
+fn store_sensor_settings(shared: &Shared, settings: SensorSettings) -> Result<()> {
+    let settings = settings.validated().map_err(anyhow::Error::msg)?;
+    let path = proto::sensor_settings_path().context("cannot determine config dir")?;
+    let text = format!(
+        "# Sensor names, scales and CPU sources for this machine, as set in PluSystemMonitor.\n{}",
+        toml::to_string_pretty(&settings)?
+    );
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
+    *shared.sensor_settings.lock().unwrap() = settings;
+    Ok(())
+}
+
+async fn recv_or_wait<T: Clone>(
+    receiver: &mut Option<broadcast::Receiver<T>>,
+) -> Result<T, RecvError> {
+    match receiver {
+        Some(receiver) => receiver.recv().await,
+        None => std::future::pending().await,
     }
 }
 

@@ -12,10 +12,14 @@ Item {
     required property Monitor monitor
     property int page: 0
     property real preferredWidth: Appearance.sizes.sidebarWidth
+    /// Machines with an update waiting, for the badge.
+    property int updatesAvailable: 0
 
     signal pageRequested(int index)
     signal connectionRequested()
     signal appearanceRequested()
+    signal sensorsRequested()
+    signal updatesRequested()
     signal widthEdited(real width)
 
     readonly property var pages: [
@@ -170,6 +174,40 @@ Item {
                     id: pulseAnimation
                     NumberAnimation { target: pulse; property: "scale"; from: 0.8; to: 2.2; duration: 900; easing.type: Easing.OutCubic }
                     NumberAnimation { target: pulse; property: "opacity"; from: 0.9; to: 0; duration: 900; easing.type: Easing.OutCubic }
+                }
+            }
+        }
+
+        NavigationItem {
+            width: settings.width
+            text: qsTr("Sensors")
+            symbol: "sensors"
+            iconShape: "clover4"
+            onClicked: root.sensorsRequested()
+        }
+
+        NavigationItem {
+            width: settings.width
+            text: qsTr("Updates")
+            symbol: "system_update"
+            iconShape: "cookie9"
+            onClicked: root.updatesRequested()
+
+            trailing: Rectangle {
+                id: updateBadge
+                visible: root.updatesAvailable > 0
+                width: Math.max(20, count.implicitWidth + 10)
+                height: 20
+                radius: 10
+                color: Appearance.colors.primary
+
+                StyledText {
+                    id: count
+                    anchors.centerIn: parent
+                    text: root.updatesAvailable
+                    color: Appearance.colors.onPrimary
+                    font.pixelSize: Appearance.fontSize.smaller
+                    font.weight: Font.DemiBold
                 }
             }
         }
