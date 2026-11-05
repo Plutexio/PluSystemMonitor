@@ -1,0 +1,19 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "PlutexArch"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Any PluSystemMonitor data source, from this or another machine, on the panel or the desktop",
+        "Icon": "plusysmon",
+        "Id": "io.github.plutexio.plusysmon",
+        "License": "GPL-3.0-or-later",
+        "Name": "PluSystemMonitor",
+        "Version": "1.0",
+        "Website": "https://github.com/Plutexio/PluSystemMonitor"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

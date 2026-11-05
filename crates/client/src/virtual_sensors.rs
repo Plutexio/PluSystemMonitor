@@ -103,6 +103,19 @@ impl VirtualSensor {
 }
 
 impl VirtualSensors {
+    /// The saved sensors (`virtual_sensors.toml`); none when there is no file.
+    pub fn load() -> anyhow::Result<Self> {
+        use anyhow::Context;
+        let path = crate::paths::virtual_sensors_file()?;
+        match std::fs::read_to_string(&path) {
+            Ok(text) => toml::from_str::<Self>(&text)
+                .map_err(anyhow::Error::from)
+                .and_then(|v| v.validated().map_err(anyhow::Error::msg))
+                .with_context(|| format!("{} can't be read", path.display())),
+            Err(_) => Ok(Self::default()),
+        }
+    }
+
     /// Refuses what makes no sense, so the file and the UI never hold it.
     pub fn validated(mut self) -> Result<Self, String> {
         let mut seen = std::collections::HashSet::new();

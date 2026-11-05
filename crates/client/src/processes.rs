@@ -62,6 +62,10 @@ impl ProcessTable {
         self.processes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.processes.is_empty()
+    }
+
     pub fn get(&self, pid: u32) -> Option<&Process> {
         self.processes.get(&pid)
     }

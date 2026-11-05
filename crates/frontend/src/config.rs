@@ -198,13 +198,7 @@ impl qobject::Config {
     }
 
     pub fn virtual_sensors(self: Pin<&mut Self>) -> QString {
-        let loaded = paths::virtual_sensors_file().and_then(|path| match fs::read_to_string(&path) {
-            Ok(text) => toml::from_str::<VirtualSensors>(&text)
-                .map_err(anyhow::Error::from)
-                .and_then(|v| v.validated().map_err(anyhow::Error::msg))
-                .with_context(|| format!("{} can't be read", path.display())),
-            Err(_) => Ok(VirtualSensors::default()),
-        });
+        let loaded = VirtualSensors::load();
         let sensors = match loaded {
             Ok(sensors) => sensors,
             Err(e) => {

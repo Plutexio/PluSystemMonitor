@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use plusysmon_client::machines::Connection;
+
 use crate::theme::DEFAULT_SOURCE;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,25 +45,6 @@ impl Default for AppView {
             sort: "name".to_owned(),
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Connection {
-    pub address: String,
-    /// Empty means "read the local daemon's token file".
-    pub token: String,
-    /// Machines connected to successfully, latest first.
-    pub recent: Vec<RecentConnection>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct RecentConnection {
-    pub address: String,
-    pub token: String,
-    /// What the machine called itself when last connected.
-    pub hostname: String,
 }
 
 /// How the process list was last left.
@@ -107,19 +90,10 @@ impl Default for ProcessView {
     }
 }
 
-impl Default for Connection {
-    fn default() -> Self {
-        Self {
-            address: "127.0.0.1".to_owned(),
-            token: String::new(),
-            recent: Vec::new(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plusysmon_client::machines::RecentConnection;
 
     #[test]
     fn recent_connections_survive_the_file() {

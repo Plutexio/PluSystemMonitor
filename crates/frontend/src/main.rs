@@ -1,18 +1,14 @@
 mod app_model;
-mod apps;
 mod assets;
-mod client;
 mod config;
 mod fleet;
 mod layout;
-mod metrics;
 mod monitor;
-mod paths;
 mod prefs;
-mod processes;
 mod theme;
-mod tls;
-mod virtual_sensors;
+
+// Shared with the daemon's widget service.
+use plusysmon_client::{apps, client, metrics, paths, processes, tls, virtual_sensors};
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 

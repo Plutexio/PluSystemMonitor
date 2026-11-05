@@ -4,6 +4,8 @@ mod table;
 mod tls;
 mod token;
 mod update;
+#[cfg(feature = "widgets")]
+mod widgets;
 
 use std::collections::VecDeque;
 use std::io::IsTerminal;
@@ -26,6 +28,7 @@ Options:
                          Use 0.0.0.0:7878 to accept connections from other machines.
   --interval-ms <MS>     Sampling interval [default: 1000]
   --history-secs <SECS>  How much history to keep for new clients [default: 1800]
+  --no-widgets           Don't offer data to desktop widgets on the session bus
   --no-updates           Don't update from the git clone install.sh ran from, even
                          when a frontend asks (install.sh --no-updates does the same)
   --fingerprint          Print the TLS certificate's fingerprint, the one frontends
@@ -39,6 +42,7 @@ struct Args {
     history_secs: u32,
     print_fingerprint: bool,
     no_updates: bool,
+    no_widgets: bool,
 }
 
 fn parse_args() -> Result<Args> {
@@ -48,6 +52,7 @@ fn parse_args() -> Result<Args> {
         history_secs: 1800,
         print_fingerprint: false,
         no_updates: false,
+        no_widgets: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -58,6 +63,7 @@ fn parse_args() -> Result<Args> {
             "--history-secs" => args.history_secs = value()?.parse().context("--history-secs")?,
             "--fingerprint" => args.print_fingerprint = true,
             "--no-updates" => args.no_updates = true,
+            "--no-widgets" => args.no_widgets = true,
             "--version" => {
                 println!(
                     "plusysmond protocol {} (works with {} and newer), build {}",
@@ -138,6 +144,16 @@ fn main() -> Result<()> {
             info!("certificate fingerprint: {}", identity.fingerprint);
 
             tokio::spawn(sample_loop(shared.clone(), capacity, args.interval_ms));
+            #[cfg(feature = "widgets")]
+            if !args.no_widgets {
+                tokio::spawn(widgets::run(
+                    args.listen,
+                    shared.token.clone(),
+                    shared.hostname.clone(),
+                ));
+            }
+            #[cfg(not(feature = "widgets"))]
+            let _ = args.no_widgets;
             tokio::select! {
                 res = server::serve(listener, identity.acceptor, shared) => res,
                 _ = shutdown_signal() => {

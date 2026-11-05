@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds PluSystemMonitor and installs the app, its menu entry and the daemon's
-# systemd user service, or with --daemon-only just the daemon and its service.
+# systemd user service and the Plasma widget, or with --daemon-only just the
+# daemon and its service.
 # Run ./install.sh --help for the options.
 set -euo pipefail
 
@@ -12,7 +13,7 @@ Options:
   --prefix <DIR>   Where to install [default: ~/.local]
                    A system prefix like /usr/local uses sudo for the copying.
   --daemon-only    Only the daemon, for servers: doesn't need Qt, installs no app,
-                   menu entry or fonts, and keeps the service running after you
+                   menu entry, widget or fonts, and keeps the service running after you
                    log out (loginctl enable-linger). With --uninstall, removes
                    only the daemon.
   --no-build       Install what is already in target/release
@@ -54,6 +55,8 @@ appdir="$prefix/share/applications"
 icondir="$prefix/share/icons/hicolor/scalable/apps"
 unitdir="$prefix/share/systemd/user"  # in systemd's user unit search path for ~/.local, /usr/local and /usr
 fontdir="$prefix/share/plusysmon/fonts"
+plasmoid_id="io.github.plutexio.plusysmon"
+plasmoiddir="$prefix/share/plasma/plasmoids/$plasmoid_id"
 # Tells the daemon where it came from, so it can update itself when asked.
 record="$prefix/share/plusysmon/install.conf"
 
@@ -98,7 +101,7 @@ if ((uninstall)); then
     fi
     if ((!daemon_only)); then
         "${sudo[@]}" rm -f "$bindir/plusysmon" "$appdir/plusysmon.desktop" "$icondir/plusysmon.svg"
-        "${sudo[@]}" rm -rf "$prefix/share/plusysmon"
+        "${sudo[@]}" rm -rf "$prefix/share/plusysmon" "$plasmoiddir"
         refresh_menus
     fi
     say "Done. Settings, layout, token and certificate are still in ~/.config/plusysmon."
@@ -114,9 +117,12 @@ if ((build)); then
         exit 1
     fi
     say "Building (release)"
-    packages=(-p plusysmond)
-    ((daemon_only)) || packages+=(-p plusysmon)
-    cargo build --release --manifest-path "$src/Cargo.toml" "${packages[@]}"
+    if ((daemon_only)); then
+        # A server has no desktop, so no widget service (and no D-Bus crates to build).
+        cargo build --release --manifest-path "$src/Cargo.toml" -p plusysmond --no-default-features
+    else
+        cargo build --release --manifest-path "$src/Cargo.toml" -p plusysmond -p plusysmon
+    fi
 fi
 
 target="$(cargo metadata --format-version 1 --no-deps --manifest-path "$src/Cargo.toml" 2>/dev/null |
@@ -179,6 +185,12 @@ if ((!daemon_only)); then
     "${sudo[@]}" install -Dm644 "$tmp/plusysmon.desktop" "$appdir/plusysmon.desktop"
     refresh_menus
 
+    # The Plasma widget (Add Widgets → PluSystemMonitor). Replaced whole, so
+    # files a newer version dropped don't linger.
+    "${sudo[@]}" rm -rf "$plasmoiddir"
+    "${sudo[@]}" mkdir -p "$(dirname "$plasmoiddir")"
+    "${sudo[@]}" cp -r "$src/packaging/plasmoid/$plasmoid_id" "$plasmoiddir"
+
     fetch_font "Google Sans Flex" GoogleSansFlex.ttf \
         "https://raw.githubusercontent.com/google/fonts/a0e3dbcdc3a3ecfafff3f071159ae0221628922d/ofl/googlesansflex/GoogleSansFlex%5BGRAD,ROND,opsz,slnt,wdth,wght%5D.ttf" \
         c31a482fbecbf2e07e6890134d20078723aadf732c9b9c6c9a44f86f8265b6fe
@@ -236,6 +248,8 @@ then run 'systemctl --user restart plusysmond'. A frontend connecting from elsew
 EOF
 else
     say "Done. PluSystemMonitor is in your application menu (or run $bindir/plusysmon)."
+    echo "The PluSystemMonitor widget is under Add Widgets on the desktop or a panel. If Plasma"
+    echo "was running an older version of it, log out and back in (or: systemctl --user restart plasma-plasmashell)."
 fi
 case ":$PATH:" in
     *":$bindir:"*) ;;

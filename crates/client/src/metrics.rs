@@ -210,6 +210,11 @@ impl Metrics {
     /// earlier but gone now (its app quit) comes back with `available: false`;
     /// one never seen gives `None`.
     pub fn get(&self, id: &str) -> Option<String> {
+        self.get_value(id).map(|value| value.to_string())
+    }
+
+    /// `get`, as a JSON value.
+    pub fn get_value(&self, id: &str) -> Option<serde_json::Value> {
         let current = self.system.iter().chain(&self.apps).find(|d| d.id == id);
         let Some((definition, series)) = current.zip(self.series.get(id)) else {
             // Without a game, its sources keep their generic names rather than
@@ -219,37 +224,31 @@ impl Metrics {
                 Some(virtual_definition(sensor))
             });
             let definition = placeholder.as_ref().or_else(|| self.known.get(id))?;
-            return Some(
-                json!({
-                    "id": definition.id,
-                    "name": definition.name,
-                    "category": definition.category,
-                    "unit": definition.unit,
-                    "accent": definition.accent,
-                    "available": false,
-                })
-                .to_string(),
-            );
+            return Some(json!({
+                "id": definition.id,
+                "name": definition.name,
+                "category": definition.category,
+                "unit": definition.unit,
+                "accent": definition.accent,
+                "available": false,
+            }));
         };
         let max = if series.max > 0.0 {
             series.max
         } else {
             series.peak
         };
-        Some(
-            json!({
-                "id": definition.id,
-                "name": definition.name,
-                "category": definition.category,
-                "unit": definition.unit,
-                "accent": definition.accent,
-                "available": true,
-                "value": series.value,
-                "max": max,
-                "history": series.history,
-            })
-            .to_string(),
-        )
+        Some(json!({
+            "id": definition.id,
+            "name": definition.name,
+            "category": definition.category,
+            "unit": definition.unit,
+            "accent": definition.accent,
+            "available": true,
+            "value": series.value,
+            "max": max,
+            "history": series.history,
+        }))
     }
 
     pub fn history(&self, id: &str) -> Vec<f64> {

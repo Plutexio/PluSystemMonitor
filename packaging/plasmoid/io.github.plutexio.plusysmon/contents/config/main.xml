@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <!-- A machine the app connected to (its address), or empty for this one. -->
+    <entry name="machine" type="String">
+      <default></default>
+    </entry>
+    <!-- Data source IDs, as in the app: cpu.total, gpu.0.temperature, ... -->
+    <entry name="sources" type="StringList">
+      <default>cpu.total</default>
+    </entry>
+    <entry name="title" type="String">
+      <default></default>
+    </entry>
+    <entry name="showTitle" type="Bool">
+      <default>true</default>
+    </entry>
+    <!-- gauge, graph, value or list. On a panel the first three are drawn
+         small; list doesn't fit there and shows as value. -->
+    <entry name="style" type="String">
+      <default>gauge</default>
+    </entry>
+    <!-- A data colour (cpu, memory, swap, gpu, network, disk) or auto. -->
+    <entry name="accent" type="String">
+      <default>auto</default>
+    </entry>
+    <!-- Graphs scale each line to its own recent peak. -->
+    <entry name="fit" type="Bool">
+      <default>false</default>
+    </entry>
+  </group>
+</kcfg>

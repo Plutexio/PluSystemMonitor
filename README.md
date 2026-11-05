@@ -234,11 +234,43 @@ options = { sources = ["gpu.0.usage", "gpu.0.temperature"], title = "Gaming" }
 Layouts made before data sources existed (`cpu.gauge`, `gpu.graph`, ...) are
 converted to these widgets when loaded.
 
-New sources are added in `crates/frontend/src/metrics.rs`; every widget can
-use them right away. A new kind of widget is a QML file in
+New sources are added in `crates/client/src/metrics.rs`; every widget, and the
+Plasma widget, can use them right away. A new kind of widget is a QML file in
 `crates/frontend/qml/widgets/` (it gets `monitor` and `options`, and reads
 sources with `Sources.read`), an entry in `qml/Widgets.qml`, and a line in
 `crates/frontend/build.rs`.
+
+### On the desktop and the panel
+
+The **PluSystemMonitor** Plasma widget puts any data source on the desktop or
+a panel, like KDE's own system monitor widgets. Find it under *Add Widgets*.
+Its settings have two pages:
+
+- **Data**: the machine (this one, or any machine the app has connected to)
+  and up to six of its sources, picked from a searchable list. The first
+  one is the main one, and the title comes from it unless you type your own.
+- **Appearance**: how the sources look on the desktop and in the popup
+  (*Gauge*, *Graph*, *Values* or *List*) and on a panel (an icon, a small
+  ring or a small graph next to each value), and the colour. The colours
+  come from your Plasma accent colour.
+
+A widget on a panel opens the desktop look when you click it.
+
+When a machine goes offline, its widgets keep its last values, faded, with a
+red dot and a line saying since when and why ("It doesn't answer", "It's up,
+but its daemon isn't running"). The daemon keeps trying every few seconds,
+and the widget comes back by itself, its graphs filled from the machine's
+history.
+
+The widget gets its data from this machine's daemon, not from the app, so the
+app doesn't have to be running. The daemon offers the sources on the session
+D-Bus (`io.github.plutexio.PluSystemMonitor`, `/Widgets`). For another
+machine, it connects to that machine itself, using the token and certificate
+the app saved, so connect to a machine once in the app before choosing it in
+a widget. Virtual sensors work too. A machine is let go a minute after the
+last widget showing it is removed. `plusysmond --no-widgets` turns this off.
+`install.sh --daemon-only` builds the daemon without it, since servers have no
+desktop.
 
 ## GPUs
 

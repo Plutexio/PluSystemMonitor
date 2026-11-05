@@ -1,0 +1,21 @@
+[package]
+name = "plusysmon-client"
+description = "PluSystemMonitor client side: daemon connections, data sources, saved machines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plusysmon-protocol.workspace = true
+anyhow.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time", "macros", "sync"] }
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+tokio = { workspace = true, features = ["io-util"] }

@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 plusysmon-protocol.workspace = true
+plusysmon-client.workspace = true
 anyhow.workspace = true
 cxx = "1"
 cxx-qt = "0.10.0"

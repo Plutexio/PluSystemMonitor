@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/daemon", "crates/frontend"]
+members = ["crates/protocol", "crates/client", "crates/daemon", "crates/frontend"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,7 @@ license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
 plusysmon-protocol = { path = "crates/protocol" }
+plusysmon-client = { path = "crates/client" }
 anyhow = "1.0.104"
 futures-util = "0.3.34"
 libc = "0.2.191"
