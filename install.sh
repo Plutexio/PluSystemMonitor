@@ -304,8 +304,10 @@ elif ((!daemon_only)); then
     "${sudo[@]}" rm -rf "$plasmoiddir"
 fi
 if ((fans && app)); then
-    # PluFan is the same program under its own name.
-    "${sudo[@]}" ln -sfn plusysmon "$bindir/plusysfan"
+    # PluFan is the same program under its own name: a hard link, not a
+    # symlink. KWin names windows after /proc/<pid>/exe, which follows
+    # symlinks, and the taskbar would then group PluFan under the monitor.
+    "${sudo[@]}" ln -f "$bindir/plusysmon" "$bindir/plusysfan"
     "${sudo[@]}" install -Dm644 "$src/packaging/plusysfan.svg" "$icondir/plusysfan.svg"
     sed "s|@BINDIR@|$bindir|g" "$src/packaging/plusysfan.desktop" >"$tmp/plusysfan.desktop"
     "${sudo[@]}" install -Dm644 "$tmp/plusysfan.desktop" "$appdir/plusysfan.desktop"
