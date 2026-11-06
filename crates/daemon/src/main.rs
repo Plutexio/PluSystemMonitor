@@ -1,4 +1,6 @@
 mod collect;
+#[cfg(feature = "fans")]
+mod fans;
 mod server;
 mod table;
 mod tls;
@@ -31,6 +33,8 @@ Options:
   --no-widgets           Don't offer data to desktop widgets on the session bus
   --no-updates           Don't update from the git clone install.sh ran from, even
                          when a frontend asks (install.sh --no-updates does the same)
+  --fan-helper <PATH>    The fan helper's socket, for builds with fan control
+                         [default: /run/plusysfand/plusysfand.sock]
   --fingerprint          Print the TLS certificate's fingerprint, the one frontends
                          ask you to compare when first connecting, and exit
   --version              Print the protocol version and build, and exit
@@ -43,6 +47,8 @@ struct Args {
     print_fingerprint: bool,
     no_updates: bool,
     no_widgets: bool,
+    #[cfg_attr(not(feature = "fans"), allow(dead_code))]
+    fan_helper: std::path::PathBuf,
 }
 
 fn parse_args() -> Result<Args> {
@@ -53,6 +59,7 @@ fn parse_args() -> Result<Args> {
         print_fingerprint: false,
         no_updates: false,
         no_widgets: false,
+        fan_helper: plusysmon_protocol::fans::HELPER_SOCKET.into(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -64,6 +71,7 @@ fn parse_args() -> Result<Args> {
             "--fingerprint" => args.print_fingerprint = true,
             "--no-updates" => args.no_updates = true,
             "--no-widgets" => args.no_widgets = true,
+            "--fan-helper" => args.fan_helper = value()?.into(),
             "--version" => {
                 println!(
                     "plusysmond protocol {} (works with {} and newer), build {}",
@@ -131,6 +139,8 @@ fn main() -> Result<()> {
         sensor_settings: Mutex::new(sensor_settings),
         raw_sensors: Mutex::default(),
         updater: update::Updater::new(args.no_updates),
+        #[cfg(feature = "fans")]
+        fans: fans::Fans::new(args.fan_helper.clone()),
     });
 
     tokio::runtime::Builder::new_current_thread()
@@ -144,6 +154,8 @@ fn main() -> Result<()> {
             info!("certificate fingerprint: {}", identity.fingerprint);
 
             tokio::spawn(sample_loop(shared.clone(), capacity, args.interval_ms));
+            #[cfg(feature = "fans")]
+            tokio::spawn(fans::run(shared.clone()));
             #[cfg(feature = "widgets")]
             if !args.no_widgets {
                 tokio::spawn(widgets::run(
@@ -187,6 +199,11 @@ async fn sample_loop(shared: Arc<server::Shared>, capacity: usize, interval_ms: 
             }
         };
         apply_sensor_settings(&shared, &mut sample);
+        // As of fan control's last tick, a few seconds at most.
+        #[cfg(feature = "fans")]
+        {
+            sample.fans = shared.fans.states.lock().unwrap().clone();
+        }
         let mut history = shared.history.lock().unwrap();
         if history.len() == capacity {
             history.pop_front();

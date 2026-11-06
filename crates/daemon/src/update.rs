@@ -275,6 +275,9 @@ impl Updater {
         command
             .arg(record.source.join("install.sh"))
             .arg("--no-service")
+            // The fan helper needs sudo, and nobody is there to answer; the
+            // one installed keeps working (its protocol is versioned).
+            .arg("--keep-fan-helper")
             .arg("--prefix")
             .arg(&record.prefix);
         if record.daemon_only {

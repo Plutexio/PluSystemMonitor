@@ -25,6 +25,8 @@
 //! and only ever gain optional fields, so a frontend can update any daemon,
 //! however far apart the two have drifted.
 
+pub mod fans;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -32,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Bumped with every change to the message types, compatible or not.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// The oldest peer this build still talks to. Raised (to `PROTOCOL_VERSION`)
 /// only by changes older peers can't cope with.
@@ -40,6 +42,9 @@ pub const OLDEST_COMPATIBLE: u32 = 5;
 
 /// The first version with [`ServerMsg::Info`], updates and sensor settings.
 pub const INFO_SINCE: u32 = 6;
+
+/// The first version with fan control messages.
+pub const FANS_SINCE: u32 = 7;
 
 /// The git commit this was built from (short hash), or "unknown".
 pub const BUILD_COMMIT: &str = env!("PLUSYSMON_COMMIT");
@@ -81,6 +86,10 @@ pub enum ClientMsg {
     GetSensorSettings,
     /// Since 6: replaces the machine's sensor settings; answered like `GetSensorSettings`.
     SetSensorSettings(SensorSettings),
+    /// Since 7: answered with [`ServerMsg::Fans`].
+    GetFans,
+    /// Since 7: replaces the machine's fan control; answered like `GetFans`.
+    SetFans(fans::FanSettings),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +147,15 @@ pub enum ServerMsg {
         #[serde(default)]
         error: Option<String>,
     },
+    /// Since 7. The machine's fan control and the fans there are to control.
+    Fans {
+        settings: fans::FanSettings,
+        outputs: Vec<fans::FanOutput>,
+        status: fans::FanStatus,
+        /// Why the settings just sent weren't taken; `settings` are the old ones.
+        #[serde(default)]
+        error: Option<String>,
+    },
 }
 
 /// Who a daemon is. Stable: fields may be added, never changed.
@@ -154,6 +172,8 @@ pub struct DaemonInfo {
     /// Whether the daemon streams to this client. When not, one side needs an update.
     pub compatible: bool,
     pub updates: UpdateStatus,
+    /// The daemon was built with fan control (since 7).
+    pub fans: bool,
 }
 
 /// What a daemon knows about updates for itself. Stable: fields may be added,
@@ -291,6 +311,9 @@ pub struct Sample {
     /// Every hardware sensor the kernel exposes (hwmon), except GPU ones,
     /// which `gpus` covers.
     pub sensors: Vec<SensorReading>,
+    /// Fans the daemon controls (since 7).
+    #[serde(default)]
+    pub fans: Vec<fans::FanState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,6 +501,11 @@ pub fn tls_cert_path() -> Option<PathBuf> {
 /// The daemon's sensor settings.
 pub fn sensor_settings_path() -> Option<PathBuf> {
     Some(config_dir()?.join("sensors.toml"))
+}
+
+/// The daemon's fan control.
+pub fn fan_settings_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("fans.toml"))
 }
 
 /// Whether two builds can talk: each must be at least as new as the other
@@ -713,6 +741,7 @@ mod tests {
             },
             gpus: vec![],
             sensors: vec![],
+            fans: vec![],
         });
         let ServerMsg::Sample(s) = decode::<ServerMsg>(&encode(&msg)).unwrap() else {
             panic!("wrong variant");

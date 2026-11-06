@@ -31,17 +31,7 @@ pub struct VirtualSensor {
 }
 
 /// What a machine's linked sources make up.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Mode {
-    /// The first linked source the machine has right now.
-    #[default]
-    First,
-    Average,
-    Highest,
-    Lowest,
-    Sum,
-}
+pub use plusysmon_protocol::fans::Mode;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -75,30 +65,15 @@ impl VirtualSensor {
     pub fn resolve(&self, machine: &str, lookup: impl Fn(&str) -> Option<Value>) -> Option<Value> {
         let binding = self.binding_for(machine)?;
         let present: Vec<Value> = binding.sources.iter().filter_map(|id| lookup(id)).collect();
-        let first = *present.first()?;
-        let count = present.len() as f64;
-        let values = present.iter().map(|v| v.value);
+        let values: Vec<f64> = present.iter().map(|v| v.value).collect();
+        let value = plusysmon_protocol::fans::combine(self.mode, &values)?;
         // The scale follows: a sum fills up to the sum of the scales.
-        let max_scale = present.iter().map(|v| v.max).fold(0.0, f64::max);
-        Some(match self.mode {
-            Mode::First => first,
-            Mode::Average => Value {
-                value: values.sum::<f64>() / count,
-                max: max_scale,
-            },
-            Mode::Highest => Value {
-                value: values.fold(f64::MIN, f64::max),
-                max: max_scale,
-            },
-            Mode::Lowest => Value {
-                value: values.fold(f64::MAX, f64::min),
-                max: max_scale,
-            },
-            Mode::Sum => Value {
-                value: values.sum(),
-                max: present.iter().map(|v| v.max).sum(),
-            },
-        })
+        let max = match self.mode {
+            Mode::First => present[0].max,
+            Mode::Sum => present.iter().map(|v| v.max).sum(),
+            _ => present.iter().map(|v| v.max).fold(0.0, f64::max),
+        };
+        Some(Value { value, max })
     }
 }
 

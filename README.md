@@ -5,7 +5,10 @@ A lightweight, good-looking system monitor split into a daemon and a frontend.
 - **`plusysmond`** (`crates/daemon`) collects metrics from `/proc`, keeps a history
   buffer and streams samples over encrypted WebSocket (MessagePack frames).
 - **`plusysmon`** (`crates/frontend`) is a Qt Quick / QML app (via cxx-qt) that can
-  connect to a daemon on this machine or any other.
+  connect to a daemon on this machine or any other. Started as `plusysfan`, it is
+  **PluFan**, the fan control app instead (see [Fan control](#fan-control)).
+- **`plusysfand`** (`crates/fand`) is the small root helper that sets fan speeds
+  for the daemon, optional like everything about fan control.
 - **`plusysmon-protocol`** (`crates/protocol`) holds the shared message types.
 
 ## Running
@@ -23,9 +26,12 @@ Requires Qt 6.6+ (`qt6-base`, `qt6-declarative`).
 ./install.sh                      # builds and installs to ~/.local
 ```
 
-This puts `plusysmon` and `plusysmond` in `~/.local/bin`, adds
-PluSystemMonitor to the application menu, and enables the daemon as a systemd
-user service, so it runs whenever you are logged in:
+It asks what to install: the system monitor, fan control, or both (or say so
+with `--monitor`, `--fans`, `--no-monitor`, `--no-fans`; the choice is
+remembered for later runs and updates, and a component left out is removed).
+The daemon comes with either. This puts `plusysmon` and `plusysmond` in
+`~/.local/bin`, adds the apps to the application menu, and enables the daemon
+as a systemd user service, so it runs whenever you are logged in:
 
 ```sh
 systemctl --user status plusysmond
@@ -43,7 +49,8 @@ let the app do it, see [Updates](#updates). Other options: `--prefix /usr/local`
 (asks for sudo), `--no-service`, `--no-build`, `--no-updates`, `--uninstall`
 (keeps `~/.config/plusysmon`).
 
-On a server, clone the repository and install only the daemon:
+On a server, clone the repository and install only the daemon (add `--fans`
+for fan control without an app, set up from PluFan on another machine):
 
 ```sh
 ./install.sh --daemon-only
@@ -378,6 +385,57 @@ Things to know:
 `cargo test -p plusysmond live_sensors -- --ignored --nocapture` lists what the
 daemon finds.
 
+## Fan control
+
+Optional, picked when installing (`./install.sh --fans`). It needs no data of
+its own: the daemon already samples every temperature, and every few seconds
+(3 by default) it works out each controlled fan's speed from those samples. So
+it costs next to nothing, and keeps going with no app open.
+
+- **PluFan** (`plusysfan`, the same program as the monitor under another name,
+  with its own menu entry, window and preferences in `fan-app.toml`) shows every
+  fan the connected machine lets software drive, grouped by board and card, and
+  sets each to **Auto** (the BIOS or the driver decides, as before), **Fixed**
+  or a **Curve**, with a minimum, a maximum and whether it may stop. Like the
+  monitor it connects to any machine, and remembers the same ones.
+- **Curves** set a speed by a temperature (or any other source). Drag the points
+  on the graph, double-click to add or remove one; the line through the graph is
+  where the input is now. A curve can follow several sources (the hottest, the
+  coolest, their average) or a [virtual sensor](#virtual-sensors), and has
+  **hysteresis** (speeds drop only once the input fell this far below where they
+  rose), **smoothing** (the input's average over some seconds) and limits on how
+  fast speeds rise and fall.
+- The settings live with the machine's daemon, in `~/.config/plusysmon/fans.toml`,
+  like its sensor settings; the file can be written by hand on a server.
+- Controlled fans are data sources too (`fan.<id>`), for widgets.
+
+Writing fan speeds needs root, and the daemon is a user service, so a small
+helper does that part: `plusysfand`, a system service installed to
+`/usr/local/libexec` (owned by root: never in a user's prefix, since whoever
+could replace it would get root). It knows nothing of temperatures; it sets the
+speeds the daemon sends over `/run/plusysfand/plusysfand.sock`, for the users
+listed in `/etc/plusysmon/fand.conf`, and keeps the fans safe:
+
+- it records how each fan was set before taking it, and gives it back exactly
+  so (the BIOS's automatic mode) when its fan is set to Auto, when the daemon
+  disconnects or stops, and when the daemon stays quiet for 10 seconds (hung);
+- it gives everything back when it stops, and after a crash through
+  `ExecStopPost=plusysfand --restore` or on its next start, from the state it
+  keeps in `/run/plusysfand`;
+- it puts a fan back under control if the firmware takes it (resume from sleep),
+  and the daemon gives a fan back when its curve's sources are gone.
+
+It drives `pwm` outputs in `/sys/class/hwmon` (motherboard fan chips, AMD
+cards, laptops, Raspberry Pi fans) and NVIDIA cards through NVML. Many boards'
+fan chips need a driver first, often `it87` or `nct6775` (`sudo modprobe it87`,
+and the module's name in `/etc/modules-load.d/` to keep it). `plusysfand --list`
+shows what it finds; `systemctl status plusysfand` and
+`journalctl -u plusysfand` show what it did. Updates from the app rebuild the
+daemon and the apps but leave the helper as it is (it would need sudo); run
+`./install.sh` yourself after a change to it, and the app says when one is due.
+`./install.sh --no-fans` (or `--uninstall`) stops the helper, which hands every
+fan back, and removes it.
+
 ## Processes
 
 The Processes page lists everything running on the connected machine: search by
@@ -425,7 +483,12 @@ current machine's processes are grouped.
 - `cargo test` runs the parser, protocol, theme and layout tests.
 - `plusysmon --screenshot out.png` renders the window, saves it after 5 s and
   quits; `--open updates` (or `connection`, `sensors`, `appearance`) opens a
-  dialog first.
+  dialog first. `--fans` starts PluFan instead.
+- Fan control without touching real fans: `plusysfand --sysfs <dir> --socket
+  <path> --state <file> --config <file>` drives a fake `<dir>/class/hwmon/...`
+  tree, and `plusysmond --fan-helper <path>` (built with `--features fans`)
+  talks to it. Both apps share `qml/shell/AppWindow.qml`; PluFan's QML is in
+  `qml/fans`.
 - `PLUSYSMON_ADDRESS=host PLUSYSMON_TOKEN=… cargo test -p plusysmon live_probe
   -- --ignored --nocapture` shows what the Updates dialog sees of a machine;
   `live_update` updates it.

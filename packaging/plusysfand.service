@@ -1,0 +1,36 @@
+[Unit]
+Description=PluSystemMonitor fan helper (sets fan speeds for plusysmond)
+# Fan chips' drivers (it87, nct6775, ...) are often loaded from modules-load.d.
+After=systemd-modules-load.service
+
+[Service]
+ExecStart=@HELPER@
+# Hands every fan back to the firmware, even after a crash of the helper.
+ExecStopPost=@HELPER@ --restore
+RuntimeDirectory=plusysfand
+RuntimeDirectoryMode=0755
+# Keeps the state file for ExecStopPost and the next start.
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=2
+
+# It only writes fan files in /sys and talks over its socket.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

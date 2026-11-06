@@ -16,6 +16,8 @@ Item {
     property var columnDefs: ({})
     property var allColumns: []
     property var processSettings: ({})
+    /// Buttons of a page of another app, before the window's controls.
+    default property alias extraActions: extra.data
 
     signal editRequested()
     signal doneRequested()
@@ -128,6 +130,12 @@ Item {
             symbol: "check"
             text: qsTr("Done")
             onClicked: root.doneRequested()
+        }
+
+        Row {
+            id: extra
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 8
         }
 
         // Processes.

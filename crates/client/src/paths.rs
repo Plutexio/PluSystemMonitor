@@ -21,6 +21,12 @@ pub fn prefs_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("frontend.toml"))
 }
 
+/// The fan app's preferences, apart from the monitor's so neither writes the
+/// other's file.
+pub fn fan_app_prefs_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("fan-app.toml"))
+}
+
 pub fn virtual_sensors_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("virtual_sensors.toml"))
 }

@@ -1,6 +1,6 @@
 //! The machines the app connected to, as kept in its preferences
-//! (`frontend.toml`). The app owns the file; others only read the
-//! `[connection]` table, ignoring the rest.
+//! (`frontend.toml`, and the fan app's `fan-app.toml`). The apps own their
+//! files; others only read the `[connection]` table, ignoring the rest.
 
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +37,8 @@ impl Default for Connection {
 }
 
 impl Connection {
-    /// The `[connection]` table of the app's preferences; empty when there
+    /// The `[connection]` table of the monitor's preferences, with the
+    /// machines only the fan app knows added to `recent`; empty when there
     /// are none or they can't be read.
     pub fn load() -> Self {
         #[derive(Default, Deserialize)]
@@ -45,12 +46,28 @@ impl Connection {
         struct Prefs {
             connection: Connection,
         }
-        paths::prefs_file()
-            .ok()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|text| toml::from_str::<Prefs>(&text).ok())
-            .unwrap_or_default()
-            .connection
+        let read = |path: anyhow::Result<std::path::PathBuf>| {
+            path.ok()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|text| toml::from_str::<Prefs>(&text).ok())
+                .map(|prefs| prefs.connection)
+        };
+        let monitor = read(paths::prefs_file());
+        let fans = read(paths::fan_app_prefs_file());
+        let (mut connection, other) = match (monitor, fans) {
+            (Some(monitor), fans) => (monitor, fans),
+            (None, Some(fans)) => (fans, None),
+            (None, None) => return Self::default(),
+        };
+        if let Some(other) = other {
+            let current = RecentConnection {
+                address: other.address.clone(),
+                token: other.token.clone(),
+                hostname: String::new(),
+            };
+            connection.recent.extend(other.recent.into_iter().chain([current]));
+        }
+        connection
     }
 
     /// Every other machine connected to, latest first, one entry each.

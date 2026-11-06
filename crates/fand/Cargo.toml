@@ -1,0 +1,16 @@
+[package]
+name = "plusysfand"
+description = "PluSystemMonitor fan helper: sets fan speeds for plusysmond as root, and gives them back to the firmware when it goes quiet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plusysmon-protocol.workspace = true
+libc.workspace = true
+# Loads libnvidia-ml at run time; machines without the driver just have no NVIDIA fans.
+nvml-wrapper = { workspace = true, optional = true }
+
+[features]
+default = ["nvidia"]
+nvidia = ["dep:nvml-wrapper"]

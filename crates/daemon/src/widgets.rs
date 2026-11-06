@@ -430,7 +430,8 @@ impl Machine {
                      PluSystemMonitor."
                 );
             }
-            Event::SignalResult { .. } | Event::Asset { .. } | Event::SensorSettings { .. } => {}
+            Event::SignalResult { .. } | Event::Asset { .. } | Event::SensorSettings { .. }
+            | Event::Fans { .. } => {}
         }
     }
 

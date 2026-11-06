@@ -49,7 +49,26 @@ pub mod qobject {
         #[qproperty(QString, daemon_build, cxx_name = "daemonBuild")]
         /// Set when the daemon and this app can't talk until one is updated.
         #[qproperty(bool, incompatible)]
+        /// The daemon was built with fan control.
+        #[qproperty(bool, daemon_fans, cxx_name = "daemonFans")]
+        /// JSON array of the fans the daemon controls, as of the latest
+        /// sample: `[{ id, name, percent, input, problem }]`.
+        #[qproperty(QString, fan_states, cxx_name = "fanStates")]
         type Monitor = super::MonitorRust;
+
+        /// Asks for the machine's fan control; `fansReceived` answers.
+        /// Returns false when its daemon is too old to know of it.
+        #[qinvokable]
+        fn request_fans(self: Pin<&mut Self>) -> bool;
+
+        /// Sends `{ interval_ms, curves: [...], fans: { id: {...} } }` (see
+        /// `plusysmon_protocol::fans`) to the daemon, which answers like a request.
+        #[qinvokable]
+        fn save_fans(self: Pin<&mut Self>, json: &QString);
+
+        /// `{ settings, outputs, status: { helper, problem }, error }`.
+        #[qsignal]
+        fn fans_received(self: Pin<&mut Self>, json: &QString);
 
         /// Asks for the machine's sensor settings; `sensorSettingsReceived` answers.
         /// Returns false when its daemon is too old to have them.
@@ -308,6 +327,7 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::{
     QByteArray, QHash, QHashPair_i32_QByteArray, QList, QModelIndex, QString, QVariant, QVector,
 };
+use plusysmon_protocol::fans::FanSettings;
 use plusysmon_protocol::{AppKind, Sample, Signal};
 use serde_json::json;
 use tokio::sync::Notify;
@@ -336,6 +356,8 @@ pub struct MonitorRust {
     daemon_version: i32,
     daemon_build: QString,
     incompatible: bool,
+    daemon_fans: bool,
+    fan_states: QString,
 
     /// What was asked for last, to connect again once a certificate is trusted.
     address: QString,
@@ -366,6 +388,8 @@ impl Default for MonitorRust {
             daemon_version: 0,
             daemon_build: QString::default(),
             incompatible: false,
+            daemon_fans: false,
+            fan_states: QString::from("[]"),
             address: QString::default(),
             token: QString::default(),
             generation: 0,
@@ -450,7 +474,27 @@ impl qobject::Monitor {
         self.as_mut().set_fingerprint(QString::default());
         self.as_mut().set_daemon_version(0);
         self.as_mut().set_daemon_build(QString::default());
+        self.as_mut().set_daemon_fans(false);
+        self.as_mut().set_fan_states(QString::from("[]"));
         self.set_incompatible(false);
+    }
+
+    pub fn request_fans(self: Pin<&mut Self>) -> bool {
+        if !*self.connected() || *self.daemon_version() < plusysmon_protocol::FANS_SINCE as i32 {
+            return false;
+        }
+        self.command(Command::GetFans);
+        true
+    }
+
+    pub fn save_fans(self: Pin<&mut Self>, json: &QString) {
+        match serde_json::from_str::<FanSettings>(&json.to_string()) {
+            Ok(settings) => self.command(Command::SetFans(settings)),
+            Err(e) => {
+                let message = format!("Malformed fan settings: {e}");
+                self.action_failed(&QString::from(&message));
+            }
+        }
     }
 
     pub fn set_virtual_sensors(mut self: Pin<&mut Self>, json: &QString) {
@@ -643,6 +687,8 @@ impl qobject::Monitor {
                     info.as_ref().map_or("", |i| i.build.as_str()),
                 ));
                 self.as_mut().set_incompatible(false);
+                self.as_mut()
+                    .set_daemon_fans(info.as_ref().is_some_and(|i| i.fans));
                 self.as_mut().rust_mut().metrics.clear();
                 self.as_mut().rust_mut().metrics.set_machine(&fingerprint);
                 for sample in &history {
@@ -749,6 +795,20 @@ impl qobject::Monitor {
                 });
                 self.sensor_settings_received(&QString::from(&json.to_string()));
             }
+            Event::Fans {
+                settings,
+                outputs,
+                status,
+                error,
+            } => {
+                let json = json!({
+                    "settings": settings,
+                    "outputs": outputs,
+                    "status": status,
+                    "error": error,
+                });
+                self.fans_received(&QString::from(&json.to_string()));
+            }
             Event::Untrusted {
                 authority,
                 fingerprint,
@@ -772,6 +832,10 @@ impl qobject::Monitor {
     fn show(mut self: Pin<&mut Self>, sample: &Sample) {
         let cores: Vec<f64> = sample.cpu.per_core.iter().map(|&c| c as f64).collect();
         self.as_mut().set_cpu_cores(QList::from(cores));
+        let fans = serde_json::to_string(&sample.fans).expect("fan states serialize");
+        if self.fan_states().to_string() != fans {
+            self.as_mut().set_fan_states(QString::from(&fans));
+        }
         self.publish_metrics();
     }
 

@@ -14,6 +14,8 @@ StyledDialog {
     property string unit
     /// Only the machine's own sources: no apps, games or virtual sensors.
     property bool machineOnly: false
+    /// With `machineOnly`, still offer virtual sensors.
+    property bool withVirtual: false
 
     signal picked(string id)
 
@@ -21,7 +23,8 @@ StyledDialog {
         const query = search.text.trim().toLowerCase()
         return Sources.catalog(root.monitor).filter(source =>
             (!root.unit || source.unit === root.unit)
-            && (!root.machineOnly || !/^(app|game|virtual)\./.test(source.id))
+            && (!root.machineOnly || !/^(app|game)\./.test(source.id))
+            && (!root.machineOnly || root.withVirtual || !source.id.startsWith("virtual."))
             && (!query || source.name.toLowerCase().includes(query) || source.category.toLowerCase().includes(query)))
     }
 

@@ -139,10 +139,7 @@ fn read_chip(dir: &Path) -> Option<Chip> {
     }
     // Most chips sit under a device; virtual ones (acpitz) keep only a name.
     let device_dir = fs::canonicalize(dir.join("device")).ok();
-    let device_id = device_dir
-        .as_ref()
-        .and_then(|d| d.file_name()?.to_str().map(str::to_owned))
-        .unwrap_or_else(|| driver.clone());
+    let device_id = plusysmon_protocol::fans::hwmon_device_id(dir, &driver);
     let model = device_dir
         .as_ref()
         .and_then(|d| read_trimmed(&d.join("model")));
@@ -257,7 +254,7 @@ fn is_soc_thermal(driver: &str) -> bool {
 }
 
 /// What a chip belongs to, in words a user recognises.
-fn device_name(driver: &str, model: Option<&str>) -> String {
+pub fn device_name(driver: &str, model: Option<&str>) -> String {
     let board = [
         "it87", "it86", "nct6", "w83", "f71", "asus", "gigabyte", "dell_smm", "thinkpad",
     ];

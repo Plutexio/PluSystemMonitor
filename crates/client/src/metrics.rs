@@ -583,11 +583,67 @@ fn read(sample: &Sample) -> Vec<Reading> {
             max,
         );
     }
+
+    for fan in &sample.fans {
+        add(
+            format!("fan.{}", fan.id),
+            format!("{} speed", fan.name),
+            "Fan control",
+            Unit::Percent,
+            "memory",
+            fan.percent,
+            100.0,
+        );
+    }
     readings
 }
 
+/// One source's value in `sample`, as [`Metrics`] would show it, without
+/// building every other source too (fan control asks every few seconds).
+pub fn value_of(sample: &Sample, id: &str) -> Option<f64> {
+    let (head, rest) = id.split_once('.')?;
+    let number = |v: Option<f32>| v.map(f64::from);
+    match head {
+        "cpu" => match rest {
+            "total" => Some(sample.cpu.total.into()),
+            "temperature" => number(sample.cpu.temperature),
+            "frequency" => number(sample.cpu.frequency),
+            "frequency_peak" => number(sample.cpu.frequency_peak),
+            "power" => number(sample.cpu.power),
+            _ => {
+                let core: usize = rest.strip_prefix("core.")?.parse().ok()?;
+                sample.cpu.per_core.get(core).map(|&v| v.into())
+            }
+        },
+        "memory" => match rest {
+            "used" => Some(sample.mem.used as f64),
+            "swap" if sample.mem.swap_total > 0 => Some(sample.mem.swap_used as f64),
+            _ => None,
+        },
+        "gpu" => {
+            let (index, key) = rest.split_once('.')?;
+            let gpu = sample.gpus.get(index.parse::<usize>().ok()?)?;
+            match key {
+                "usage" => Some(gpu.usage.into()),
+                "vram" => Some(gpu.memory_used as f64),
+                "temperature" => number(gpu.temperature),
+                "power" => number(gpu.power),
+                "core_clock" => gpu.core_clock.map(f64::from),
+                "memory_clock" => gpu.memory_clock.map(f64::from),
+                "fan" => number(gpu.fan),
+                "encoder" => number(gpu.encoder),
+                "decoder" => number(gpu.decoder),
+                _ => None,
+            }
+        }
+        "sensor" => sample.sensors.iter().find(|s| s.id == rest).map(|s| s.value),
+        "fan" => sample.fans.iter().find(|f| f.id == rest).map(|f| f.percent),
+        _ => None,
+    }
+}
+
 /// "NVIDIA GeForce RTX 5070 Ti" → "RTX 5070 Ti"; the vendor is implied.
-fn short_gpu_name(name: &str) -> &str {
+pub fn short_gpu_name(name: &str) -> &str {
     ["NVIDIA GeForce ", "NVIDIA ", "AMD Radeon ", "AMD "]
         .iter()
         .find_map(|prefix| name.strip_prefix(prefix))
@@ -636,6 +692,7 @@ mod tests {
                 decoder: None,
             }],
             sensors: vec![],
+            fans: vec![],
         }
     }
 
@@ -881,5 +938,47 @@ mod tests {
         // No natural scale: the highest value seen.
         assert_eq!(fan["max"], 450.0);
         assert_eq!(get(&metrics, "sensor.nvme0.temp1")["max"], 95.0);
+    }
+
+    /// Fan control reads single values; they must be the ones widgets show.
+    #[test]
+    fn single_values_match_the_catalog() {
+        let mut full = sample(37.5, 2100);
+        full.cpu.temperature = Some(61.0);
+        full.cpu.frequency = Some(4100.0);
+        full.cpu.frequency_peak = Some(5200.0);
+        full.cpu.power = Some(88.0);
+        full.mem.swap_total = 8;
+        full.gpus[0].fan = Some(44.0);
+        full.sensors = vec![plusysmon_protocol::SensorReading {
+            id: "nvme0.temp1".into(),
+            device: "NVMe".into(),
+            driver: "nvme".into(),
+            label: "Composite".into(),
+            kind: SensorKind::Temperature,
+            value: 48.0,
+            limit: None,
+        }];
+        full.fans = vec![plusysmon_protocol::fans::FanState {
+            id: "it87.2624.pwm2".into(),
+            name: "Motherboard Fan 2".into(),
+            percent: 42.0,
+            input: Some(61.0),
+            problem: String::new(),
+        }];
+        let readings = read(&full);
+        assert!(readings.len() > 15);
+        for reading in &readings {
+            assert_eq!(
+                value_of(&full, &reading.definition.id),
+                Some(reading.value),
+                "{}",
+                reading.definition.id
+            );
+        }
+        assert_eq!(value_of(&full, "fan.it87.2624.pwm2"), Some(42.0));
+        assert_eq!(value_of(&full, "gpu.3.usage"), None);
+        assert_eq!(value_of(&full, "cpu.core.99"), None);
+        assert_eq!(value_of(&full, "nothing"), None);
     }
 }

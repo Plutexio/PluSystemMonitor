@@ -26,3 +26,5 @@ zbus = { version = "5", default-features = false, features = ["tokio"], optional
 [features]
 default = ["widgets"]
 widgets = ["dep:plusysmon-client", "dep:serde_json", "dep:zbus"]
+# Fan control through the plusysfand helper. install.sh --fans turns it on.
+fans = ["dep:plusysmon-client"]

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PluFan
+GenericName=Fan Control
+Comment=Set fan speeds by temperature, on this or another machine
+Exec=@BINDIR@/plusysfan
+Icon=plusysfan
+Terminal=false
+Categories=System;Settings;HardwareSettings;Qt;
+Keywords=fan;fans;cooling;curve;temperature;pwm;speed;noise;
+StartupNotify=true
+StartupWMClass=plusysfan

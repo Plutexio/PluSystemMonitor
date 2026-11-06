@@ -11,6 +11,12 @@ mod users;
 
 pub use apps::Assets;
 
+/// What a hwmon chip belongs to, in words a user recognises.
+#[cfg(feature = "fans")]
+pub fn device_name(driver: &str) -> String {
+    sensors::device_name(driver, None)
+}
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -51,6 +57,7 @@ impl Collector {
             mem: mem::sample()?,
             gpus: self.gpu.sample(),
             sensors,
+            fans: Vec::new(),
         })
     }
 

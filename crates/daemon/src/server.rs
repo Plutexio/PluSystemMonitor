@@ -49,6 +49,8 @@ pub struct Shared {
     /// The latest sensor readings before the settings were applied.
     pub raw_sensors: Mutex<Vec<SensorReading>>,
     pub updater: Arc<Updater>,
+    #[cfg(feature = "fans")]
+    pub fans: crate::fans::Fans,
 }
 
 pub async fn serve(listener: TcpListener, tls: TlsAcceptor, shared: Arc<Shared>) -> Result<()> {
@@ -130,6 +132,7 @@ async fn handle(
             arch: std::env::consts::ARCH.to_owned(),
             compatible,
             updates: shared.updater.status(),
+            fans: cfg!(feature = "fans"),
         };
         send(&mut ws, &ServerMsg::Info(info)).await?;
     }
@@ -262,6 +265,22 @@ async fn handle(
                         };
                         send(&mut ws, &sensor_settings_msg(&shared, error)).await?;
                     }
+                    ClientMsg::GetFans => {
+                        send(&mut ws, &fans_msg(&shared, None).await).await?;
+                    }
+                    ClientMsg::SetFans(settings) => {
+                        let error = match store_fans(&shared, settings) {
+                            Ok(()) => {
+                                info!(%peer, "fan control changed");
+                                None
+                            }
+                            Err(e) => {
+                                warn!(%peer, "fan control refused: {e:#}");
+                                Some(format!("{e:#}"))
+                            }
+                        };
+                        send(&mut ws, &fans_msg(&shared, error).await).await?;
+                    }
                 }
             }
         }
@@ -289,6 +308,37 @@ fn store_sensor_settings(shared: &Shared, settings: SensorSettings) -> Result<()
     std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
     *shared.sensor_settings.lock().unwrap() = settings;
     Ok(())
+}
+
+#[cfg(feature = "fans")]
+async fn fans_msg(shared: &Shared, error: Option<String>) -> ServerMsg {
+    crate::fans::describe(shared, error).await
+}
+
+#[cfg(feature = "fans")]
+fn store_fans(shared: &Shared, settings: proto::fans::FanSettings) -> Result<()> {
+    crate::fans::store(shared, settings)
+}
+
+/// A daemon without fan control says so, so the fan app can tell the user.
+#[cfg(not(feature = "fans"))]
+async fn fans_msg(_shared: &Shared, error: Option<String>) -> ServerMsg {
+    ServerMsg::Fans {
+        settings: Default::default(),
+        outputs: Vec::new(),
+        status: proto::fans::FanStatus {
+            helper: false,
+            problem: "This machine's daemon was installed without fan control. \
+                      Run install.sh --fans there to add it."
+                .to_owned(),
+        },
+        error,
+    }
+}
+
+#[cfg(not(feature = "fans"))]
+fn store_fans(_shared: &Shared, _settings: proto::fans::FanSettings) -> Result<()> {
+    bail!("this daemon was installed without fan control")
 }
 
 async fn recv_or_wait<T: Clone>(

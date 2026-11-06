@@ -14,6 +14,12 @@ Item {
     property real preferredWidth: Appearance.sizes.sidebarWidth
     /// Machines with an update waiting, for the badge.
     property int updatesAvailable: 0
+    /// What the app is, under the machine's name, and its symbol.
+    property string subtitle: qsTr("System Monitor")
+    property string badgeSymbol: "monitor_heart"
+    property string pagesTitle: qsTr("Monitor")
+    /// The fan app has no sensor settings of its own to offer.
+    property bool showSensors: true
 
     signal pageRequested(int index)
     signal connectionRequested()
@@ -22,7 +28,7 @@ Item {
     signal updatesRequested()
     signal widthEdited(real width)
 
-    readonly property var pages: [
+    property var pages: [
         { name: qsTr("Overview"), symbol: "dashboard", shape: "cookie9" },
         { name: qsTr("Apps"), symbol: "apps", shape: "flower" },
         { name: qsTr("Processes"), symbol: "view_list", shape: "clover4" }
@@ -53,7 +59,7 @@ Item {
             size: 38
             iconSize: 20
             shape: "cookie12"
-            symbol: "monitor_heart"
+            symbol: root.badgeSymbol
             color: Appearance.colors.primaryContainer
             iconColor: Appearance.colors.onPrimaryContainer
             hovered: headerHover.hovered
@@ -76,7 +82,7 @@ Item {
             }
             StyledText {
                 width: parent.width
-                text: root.monitor.connected ? qsTr("System Monitor") : qsTr("Not connected")
+                text: root.monitor.connected ? root.subtitle : qsTr("Not connected")
                 font.pixelSize: Appearance.fontSize.smaller
                 color: Appearance.colors.onSurfaceVariant
                 elide: Text.ElideRight
@@ -94,7 +100,7 @@ Item {
 
         SectionLabel {
             width: parent.width
-            text: qsTr("Monitor")
+            text: root.pagesTitle
         }
 
         Repeater {
@@ -180,6 +186,7 @@ Item {
 
         NavigationItem {
             width: settings.width
+            visible: root.showSensors
             text: qsTr("Sensors")
             symbol: "sensors"
             iconShape: "clover4"

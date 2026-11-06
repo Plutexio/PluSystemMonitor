@@ -1,3 +1,4 @@
+mod app;
 mod app_model;
 mod assets;
 mod config;
@@ -12,19 +13,20 @@ use plusysmon_client::{apps, client, metrics, paths, processes, tls, virtual_sen
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
-/// Name of the installed `.desktop` file, so Wayland compositors show its icon.
-const DESKTOP_FILE: &str = "plusysmon";
+use app::App;
 
 fn main() {
+    let which = App::from_args(&std::env::args().collect::<Vec<_>>());
+    which.set_current();
     let mut app = QGuiApplication::new();
     if let Some(app) = app.as_mut() {
-        app.set_application_name(&QString::from("PluSystemMonitor"));
+        app.set_application_name(&QString::from(which.name()));
     }
-    QGuiApplication::set_desktop_file_name(&QString::from(DESKTOP_FILE));
+    QGuiApplication::set_desktop_file_name(&QString::from(which.desktop_file()));
 
     let mut engine = QQmlApplicationEngine::new();
     if let Some(engine) = engine.as_mut() {
-        engine.load(&QUrl::from("qrc:/qt/qml/PluSystemMonitor/qml/Main.qml"));
+        engine.load(&QUrl::from(which.root_qml()));
     }
 
     if let Some(app) = app.as_mut() {

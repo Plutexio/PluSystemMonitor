@@ -80,6 +80,7 @@ use anyhow::{Context, Result};
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 
+use crate::app::App;
 use crate::layout::{self, Layout};
 use crate::paths;
 use crate::prefs::Prefs;
@@ -102,10 +103,18 @@ fn modified(path: &PathBuf) -> Option<SystemTime> {
 
 impl qobject::Config {
     pub fn preferences(&self) -> QString {
-        let prefs = paths::prefs_file()
-            .ok()
-            .and_then(|path| fs::read_to_string(path).ok())
-            .and_then(|text| toml::from_str::<Prefs>(&text).ok())
+        let read = |path: Result<PathBuf>| {
+            path.ok()
+                .and_then(|path| fs::read_to_string(path).ok())
+                .and_then(|text| toml::from_str::<Prefs>(&text).ok())
+        };
+        let prefs = read(App::current().prefs_file())
+            .or_else(|| {
+                // The fan app starts out with the monitor's connection and look.
+                let mut imported = read(paths::prefs_file()).filter(|_| App::current() == App::Fans)?;
+                imported.page = 0;
+                Some(imported)
+            })
             .unwrap_or_default();
         QString::from(&serde_json::to_string(&prefs).expect("prefs serialize"))
     }
@@ -114,7 +123,7 @@ impl qobject::Config {
         let result = (|| -> Result<()> {
             let prefs: Prefs =
                 serde_json::from_str(&json.to_string()).context("malformed preferences")?;
-            paths::write_atomic(&paths::prefs_file()?, &toml::to_string_pretty(&prefs)?)
+            paths::write_atomic(&App::current().prefs_file()?, &toml::to_string_pretty(&prefs)?)
         })();
         self.report(result);
     }

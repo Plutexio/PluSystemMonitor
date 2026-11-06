@@ -8,6 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use plusysmon_protocol::{
     self as proto, ClientMsg, DEFAULT_PORT, DaemonInfo, OLDEST_COMPATIBLE, PROTOCOL_VERSION,
     ProcessUpdate, Sample, SensorReading, SensorSettings, ServerMsg, Signal,
+    fans::{FanOutput, FanSettings, FanStatus},
 };
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
@@ -58,6 +59,12 @@ pub enum Event {
         sensors: Vec<SensorReading>,
         error: Option<String>,
     },
+    Fans {
+        settings: FanSettings,
+        outputs: Vec<FanOutput>,
+        status: FanStatus,
+        error: Option<String>,
+    },
     /// The daemon's certificate isn't one we trust; no retry until the user
     /// decides. `pinned` is the one it should have had, if we knew this address.
     Untrusted {
@@ -75,6 +82,9 @@ pub enum Command {
     Asset { key: String },
     GetSensorSettings,
     SetSensorSettings(SensorSettings),
+    /// Only for daemons from version 7 ([`proto::FANS_SINCE`]) with fan control.
+    GetFans,
+    SetFans(FanSettings),
 }
 
 enum End {
@@ -333,6 +343,8 @@ async fn session(
                     Some(Command::SetSensorSettings(settings)) => {
                         ClientMsg::SetSensorSettings(settings)
                     }
+                    Some(Command::GetFans) => ClientMsg::GetFans,
+                    Some(Command::SetFans(settings)) => ClientMsg::SetFans(settings),
                     // The UI dropped its sender; `stop` ends this thread shortly.
                     None => std::future::pending().await,
                 };
@@ -376,6 +388,17 @@ async fn session(
             } => Event::SensorSettings {
                 settings,
                 sensors,
+                error,
+            },
+            ServerMsg::Fans {
+                settings,
+                outputs,
+                status,
+                error,
+            } => Event::Fans {
+                settings,
+                outputs,
+                status,
                 error,
             },
             // The update panel follows updates on connections of its own.
