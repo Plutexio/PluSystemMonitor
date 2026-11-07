@@ -22,6 +22,16 @@ use crate::tls;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_DELAY: Duration = Duration::from_secs(2);
+/// A daemon sends a sample every interval, so this much silence means the
+/// connection died without a word: typically the other side dropped it while
+/// this computer slept, and TCP alone would wait for it forever.
+const SILENCE_MIN: Duration = Duration::from_secs(10);
+const SILENCE_INTERVALS: u32 = 4;
+
+/// How long a daemon sampling every `interval_ms` may stay quiet.
+fn silence_limit(interval_ms: u32) -> Duration {
+    (Duration::from_millis(interval_ms.into()) * SILENCE_INTERVALS).max(SILENCE_MIN)
+}
 
 pub enum Event {
     Connecting(String),
@@ -328,9 +338,14 @@ async fn session(
     }
 
     let mut info: Option<DaemonInfo> = None;
+    let mut silence = SILENCE_MIN;
+    let mut deadline = tokio::time::Instant::now() + silence;
     loop {
         let msg = tokio::select! {
             msg = link.recv() => msg?,
+            _ = tokio::time::sleep_until(deadline) => {
+                bail!("timed out: no word from the daemon for {}s", silence.as_secs())
+            }
             command = commands.recv() => {
                 let msg = match command {
                     Some(Command::Subscribe { processes }) => {
@@ -353,6 +368,7 @@ async fn session(
             }
         };
         let Some(msg) = msg else { break };
+        deadline = tokio::time::Instant::now() + silence;
         let event = match msg {
             ServerMsg::Info(daemon) => {
                 if !daemon.compatible {
@@ -366,15 +382,21 @@ async fn session(
                 interval_ms,
                 uid,
                 history,
-            } => Event::Connected {
-                hostname,
-                interval_ms,
-                uid,
-                history,
-                fingerprint: link.fingerprint.clone(),
-                version: info.as_ref().map_or(version, |i| i.version.min(PROTOCOL_VERSION)),
-                info: info.clone(),
-            },
+            } => {
+                silence = silence_limit(interval_ms);
+                deadline = tokio::time::Instant::now() + silence;
+                Event::Connected {
+                    hostname,
+                    interval_ms,
+                    uid,
+                    history,
+                    fingerprint: link.fingerprint.clone(),
+                    version: info
+                        .as_ref()
+                        .map_or(version, |i| i.version.min(PROTOCOL_VERSION)),
+                    info: info.clone(),
+                }
+            }
             ServerMsg::Sample(sample) => Event::Sample(sample),
             ServerMsg::Processes(update) => Event::Processes(update),
             ServerMsg::SignalResult { pid, signal, error } => {
@@ -466,6 +488,13 @@ mod tests {
         assert_eq!(authority("[::1]:9000"), "[::1]:9000");
         assert_eq!(authority("ws://box:1"), "box:1");
         assert_eq!(authority("wss://box/"), "box:7878");
+    }
+
+    #[test]
+    fn tolerates_a_few_missed_samples() {
+        assert_eq!(silence_limit(1000), Duration::from_secs(10));
+        assert_eq!(silence_limit(100), Duration::from_secs(10));
+        assert_eq!(silence_limit(5000), Duration::from_secs(20));
     }
 
     #[test]
