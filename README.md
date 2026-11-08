@@ -1,42 +1,52 @@
 # PluSystemMonitor
 
-A lightweight, good-looking system monitor split into a daemon and a frontend.
+A lightweight, good-looking system monitor for Linux. A small daemon collects
+metrics, and a Material 3 (Qt Quick) app shows them, for this machine or any
+other on your network.
 
-- **`plusysmond`** (`crates/daemon`) collects metrics from `/proc`, keeps a history
-  buffer and streams samples over encrypted WebSocket (MessagePack frames).
-- **`plusysmon`** (`crates/frontend`) is a Qt Quick / QML app (via cxx-qt) that can
-  connect to a daemon on this machine or any other. Started as `plusysfan`, it is
-  **PluFan**, the fan control app instead (see [Fan control](#fan-control)).
-- **`plusysfand`** (`crates/fand`) is the small root helper that sets fan speeds
-  for the daemon, optional like everything about fan control.
-- **`plusysmon-protocol`** (`crates/protocol`) holds the shared message types.
+## What it can do
 
-## Running
+- **Overview dashboard**: CPU, memory, GPU, temperatures and more as gauges,
+  graphs and values on a grid you arrange yourself.
+- **Processes and Apps**: everything running, grouped into the apps and Steam
+  games you started, with search, sorting and End/Kill.
+- **GPUs**: NVIDIA (incl. per-process usage) and AMD.
+- **Sensors**: every hwmon sensor, with your own names and scaling, plus
+  virtual sensors that work the same across different machines.
+- **Fan control (PluFan)**: fixed speeds or temperature curves, run by the
+  daemon, with fans safely handed back to the BIOS when anything goes wrong.
+- **Remote machines**: connect to any machine running the daemon, always over
+  TLS, with SSH-style fingerprint checks.
+- **Updates from the app**: every connected machine can update itself.
+- **Themes**: follows your wallpaper's colours (Matugen) or picks from
+  Catppuccin, Gruvbox, Nord, Tokyo Night and others, or your own.
+- **Plasma widget**: any metric on the desktop or a panel.
+
+## Installing
+
+You need Rust, a C compiler and Qt 6.6+ (`qt6-base`, `qt6-declarative`).
 
 ```sh
-cargo run --release -p plusysmond          # listens on 127.0.0.1:7878
-cargo run --release -p plusysmon           # connects to 127.0.0.1 automatically
+git clone https://github.com/Plutexio/PluSystemMonitor
+cd PluSystemMonitor
+./install.sh
 ```
 
-Requires Qt 6.6+ (`qt6-base`, `qt6-declarative`).
+It asks whether you want the monitor, fan control or both, installs everything
+to `~/.local` and starts the daemon as a systemd user service. Open
+**PluSystemMonitor** (or **PluFan**) from the application menu.
 
-### Installing
+Run `./install.sh` again to update (or use **Updates** in the app), and
+`./install.sh --uninstall` to remove it. `./install.sh --help` lists the other
+options.
 
-```sh
-./install.sh                      # builds and installs to ~/.local
-```
+### On a server
 
-It asks what to install: the system monitor, fan control, or both (or say so
-with `--monitor`, `--fans`, `--no-monitor`, `--no-fans`; the choice is
-remembered for later runs and updates, and a component left out is removed).
-The daemon comes with either. This puts `plusysmon` and `plusysmond` in
-`~/.local/bin`, adds the apps to the application menu, and enables the daemon
-as a systemd user service, so it runs whenever you are logged in:
+Install just the daemon (no Qt needed), and let it listen on the network:
 
 ```sh
-systemctl --user status plusysmond
-journalctl --user -u plusysmond   # its log
-systemctl --user edit plusysmond  # extra options, see below
+./install.sh --daemon-only
+systemctl --user edit plusysmond
 ```
 
 ```ini
@@ -44,457 +54,16 @@ systemctl --user edit plusysmond  # extra options, see below
 Environment="PLUSYSMOND_ARGS=--listen 0.0.0.0:7878"
 ```
 
-Run `./install.sh` again after pulling to update (it restarts the daemon), or
-let the app do it, see [Updates](#updates). Other options: `--prefix /usr/local`
-(asks for sudo), `--no-service`, `--no-build`, `--no-updates`, `--uninstall`
-(keeps `~/.config/plusysmon`).
-
-On a server, clone the repository and install only the daemon (add `--fans`
-for fan control without an app, set up from PluFan on another machine):
-
-```sh
-./install.sh --daemon-only
-```
-
-This builds and installs nothing but `plusysmond` and its service, so it needs
-Rust and a C compiler but not Qt. It also runs `loginctl enable-linger`, as a
-user service would otherwise stop when you log out and not start at boot. The
-daemon still only listens on localhost until you add the `--listen` option above;
-the script's last lines say how. `./install.sh --daemon-only --uninstall` removes
-the daemon again and leaves linger on, since other services may rely on it.
-
-### Remote machines
-
-```sh
-plusysmond --listen 0.0.0.0:7878
-cat ~/.config/plusysmon/token              # paste this into the frontend
-```
-
-On localhost the frontend reads the token file itself. Machines you've connected
-to are listed under **Recent** in the Connection dialog, tokens included (they're
-kept in `~/.config/plusysmon/frontend.toml`, readable only by you).
-
-### Encryption
-
-Connections are always TLS 1.3; there is no unencrypted mode. The daemon makes a
-self-signed certificate on first run (`~/.config/plusysmon/tls-cert.der` and
-`tls-key.der`), so like SSH, the frontend identifies a machine by its fingerprint:
-
-- The first time you connect to a machine, it shows the fingerprint and asks.
-  Compare it with what `plusysmond --fingerprint` prints over there (also in the
-  daemon's log). Your answer is kept in `~/.config/plusysmon/known_daemons.toml`.
-- If a machine later shows a different certificate, the frontend warns you and
-  doesn't connect unless you accept it. Deleting the daemon's two files makes a
-  new certificate and causes this on purpose.
-- This computer's own daemon is recognised from its certificate file, no questions.
-
-The token is only sent after this check, so a machine you haven't accepted never
-sees it. Frontends and daemons from before encryption can't talk to current ones;
-update both.
-
-The Recent list shows whether each machine is up: a green dot when something
-answers at its address, red when nothing does (it looks again every 15 seconds
-while the dialog is open).
-
-## Updates
-
-**Updates** in the drawer lists every machine connected to before, what each
-runs (build, protocol version, CPU architecture) and whether upstream has
-something newer. A badge counts the machines with an update waiting. **Update**
-(or **Update All**) has a machine update itself from the git clone it was
-installed from:
-
-1. `git fetch` and a fast-forward to upstream (it refuses if the clone has
-   commits or changes of its own),
-2. `install.sh` again with the options it was installed with, at a lower
-   priority (building takes a while on a Raspberry Pi; the output shows under
-   the row),
-3. the daemon restarts into the new binary in place, so systemd doesn't notice,
-   and the dialog waits for it to come back.
-
-When this computer updates, the app is rebuilt too; the dialog then offers to
-restart it.
-
-It's all optional. Nothing updates unless asked in that dialog. "Look for
-Updates Automatically" (on by default) has the machines ask GitHub every few
-hours; off, they only look when you press Check Now. A machine installed with
-`./install.sh --no-updates` (remembered until `--updates`), or a daemon started
-with `--no-updates`, never updates itself and says so; update it however you
-like, or not at all.
-
-The daemon finds its clone through `<prefix>/share/plusysmon/install.conf`,
-which `install.sh` writes. A daemon that wasn't installed that way, or whose
-prefix needs root, can't update itself.
-
-### Versions and compatibility
-
-Daemons and frontends tell each other their protocol version and the oldest
-version they still work with. Additions keep older versions working (an older
-frontend simply doesn't see what's new); only changes that can't be made that
-way raise the oldest version, and then the older side shows that it's
-incompatible and **requires an update** instead of misbehaving. Updating keeps
-working across such a break: the hello, the daemon's info and the update
-messages never change.
-
-Daemons from before this (protocol 5) still work with current frontends, but
-can't update themselves: run `./install.sh` on them once by hand.
-`plusysmond --version` prints what a daemon speaks.
-
-## Look and themes
-
-The interface follows the Swiftify style guide: Material 3 Expressive as end4's
-dots-hyprland draws it, with Material colour roles, shapes from Material's shape
-library, springy motion and round "bubbly" titles in Google Sans Flex. Icons are
-Material Symbols Rounded. Both fonts are used from the system when installed,
-otherwise from `<prefix>/share/plusysmon/fonts` (`install.sh` downloads them),
-`~/.local/share/plusysmon/fonts` or Swiftify's copy.
-
-Colours come from a theme, picked under **Appearance** in the drawer:
-
-- **Desktop** (default): the Material scheme Matugen generated for your
-  wallpaper (end4's quickshell, `~/.config/matugen`, DankMaterialShell, …),
-  reloaded live when it changes. Without one it falls back to the app's accent.
-- **PluSystemMonitor**: a scheme seeded from the app's violet.
-- Rice palettes: Catppuccin, Rosé Pine, Gruvbox, Nord, Tokyo Night, Dracula,
-  Everforest, Kanagawa, Solarized, One and a plain Default, each light and dark.
-
-Light or dark follows the desktop unless set in the same dialog, which also has
-Reduce Motion, Performance Mode and No Shapes. To make your own theme, put a TOML
-file in `~/.config/plusysmon/themes/` (the "Open Themes Folder" button creates
-it), either a seed colour:
-
-```toml
-# ~/.config/plusysmon/themes/neon.toml
-name = "Neon"
-seed = "#ff2d55"
-variant = "vibrant"   # tonal_spot (default), content, fidelity, expressive, …
-```
-
-or the 13 colours of a rice palette, for `[dark]`, `[light]` or both (one is
-used for both modes when the other is missing):
-
-```toml
-[dark]
-lowest = "#11111b"    # the deepest ground
-window = "#181825"
-page = "#1e1e2e"
-raised = "#313244"
-raised_more = "#45475a"
-line = "#585b70"
-text = "#cdd6f4"
-subtext = "#a6adc8"
-muted = "#7f849c"
-primary = "#cba6f7"
-secondary = "#f5c2e7"
-tertiary = "#94e2d5"
-error = "#f38ba8"
-```
-
-The colours the data is drawn in (CPU, memory, GPU, …) keep their own hues and
-are pulled toward each theme's primary. Edits to the active theme apply live;
-mistakes show up as an error in the app and in the theme list.
-
-## Layout
-
-"Edit Layout" lets you drag widgets around a 12-column grid, resize them from the
-corner handle, change their options and add or remove them. The result is saved
-to `~/.config/plusysmon/layout.toml`. A layout file that can't be read is moved
-to `layout.toml.broken` and the default layout is used.
-
-### Widgets and data sources
-
-Widgets don't hard-code what they show. Every number the daemon reports is a
-**data source** with an ID, a name, a unit, a scale and two minutes of
-history: `cpu.total`, `cpu.core.3`, `memory.used`, `memory.swap`,
-`gpu.0.usage`, `gpu.0.vram`, `gpu.0.temperature`, `gpu.0.power`,
-`gpu.0.core_clock`, `gpu.0.memory_clock`, `gpu.0.fan`, `gpu.0.encoder`,
-`gpu.0.decoder` (the GPU ones exist when the driver reports them).
-
-Apps are sources too: `app.<app id>.cpu`, `.memory`, `.gpu` and `.vram` for
-every running app (e.g. `app.steam:1062090.gpu`), and `game.cpu`,
-`game.memory`, `game.gpu`, `game.vram` for **whichever game is running** (the
-one using the most GPU). A game widget can be set up before any game runs; its
-title follows the game. Using app or game sources makes the daemon collect
-processes while the Overview is open.
-
-The generic widgets show whichever sources you pick in their settings:
-
-- **Gauge**: the first source on a ring, the others as bars below it.
-- **Graph**: up to four sources over time, each scaled to its own range, or
-  to its recent peak with "Fit lines to their data" (handy for one app's
-  share of the CPU, which is small next to the whole machine).
-- **Value**: one source as a big number with a sparkline.
-
-The title comes from the first source unless you type your own; colours follow
-the sources unless you pick one. In `layout.toml`:
-
-```toml
-[[widgets]]
-type = "graph"
-x = 0
-y = 0
-w = 6
-h = 4
-options = { sources = ["gpu.0.usage", "gpu.0.temperature"], title = "Gaming" }
-```
-
-Layouts made before data sources existed (`cpu.gauge`, `gpu.graph`, ...) are
-converted to these widgets when loaded.
-
-New sources are added in `crates/client/src/metrics.rs`; every widget, and the
-Plasma widget, can use them right away. A new kind of widget is a QML file in
-`crates/frontend/qml/widgets/` (it gets `monitor` and `options`, and reads
-sources with `Sources.read`), an entry in `qml/Widgets.qml`, and a line in
-`crates/frontend/build.rs`.
-
-### On the desktop and the panel
-
-The **PluSystemMonitor** Plasma widget puts any data source on the desktop or
-a panel, like KDE's own system monitor widgets. Find it under *Add Widgets*.
-Its settings have two pages:
-
-- **Data**: the machine (this one, or any machine the app has connected to)
-  and up to six of its sources, picked from a searchable list. The first
-  one is the main one, and the title comes from it unless you type your own.
-- **Appearance**: how the sources look on the desktop and in the popup
-  (*Gauge*, *Graph*, *Values* or *List*) and on a panel (an icon, a small
-  ring or a small graph next to each value), and the colour. The colours
-  come from your Plasma accent colour.
-
-A widget on a panel opens the desktop look when you click it.
-
-When a machine goes offline, its widgets keep its last values, faded, with a
-red dot and a line saying since when and why ("It doesn't answer", "It's up,
-but its daemon isn't running"). The daemon keeps trying every few seconds,
-and the widget comes back by itself, its graphs filled from the machine's
-history.
-
-The widget gets its data from this machine's daemon, not from the app, so the
-app doesn't have to be running. The daemon offers the sources on the session
-D-Bus (`io.github.plutexio.PluSystemMonitor`, `/Widgets`). For another
-machine, it connects to that machine itself, using the token and certificate
-the app saved, so connect to a machine once in the app before choosing it in
-a widget. Virtual sensors work too. A machine is let go a minute after the
-last widget showing it is removed. `plusysmond --no-widgets` turns this off.
-`install.sh --daemon-only` builds the daemon without it, since servers have no
-desktop.
-
-## GPUs
-
-- **NVIDIA** through NVML (`libnvidia-ml.so`, part of the driver), loaded at
-  runtime: the daemon runs fine without it. Load, VRAM, temperature, power,
-  clocks, fan, encoder/decoder, and per-process GPU load and video memory
-  (Processes columns, app totals). NVML adds about 20 MiB to the daemon.
-- **AMD** through amdgpu's sysfs files (`gpu_busy_percent`, VRAM, hwmon);
-  names come from the PCI ID database. Not yet tested on real hardware, and
-  without per-process figures for now.
-- Intel GPUs are not shown yet: their load needs perf counters.
-
-`cargo test -p plusysmond live_gpus -- --ignored --nocapture` prints what the
-daemon sees on the current machine.
-
-## Sensors
-
-Every hwmon sensor the kernel exposes becomes a data source
-(`sensor.<device>.<feature>`, e.g. `sensor.coretemp.0.temp1`,
-`sensor.it87.2624.fan1`, `sensor.nvme0.temp1`): temperatures, voltages,
-fans, power and current, grouped by what they belong to (CPU, motherboard,
-NVMe drives, network adapter, ...). IDs use the device, not the `hwmonN`
-number, so they survive reboots. Fan headers and voltage inputs that never
-read anything are left out. The Processor also gets `cpu.temperature`
-(package), `cpu.frequency` (average clock), `cpu.frequency_peak` (fastest
-core) and, when readable, `cpu.power`.
-
-On ARM boards (Raspberry Pi, Rockchip, ...) the CPU temperature comes from the
-SoC's thermal zone (`cpu_thermal`, `soc_thermal`, ...).
-
-### Per machine: Sensors
-
-**Sensors** in the drawer sets up the connected machine's sensors:
-
-- which sensor `cpu.temperature` (and `cpu.power`) comes from, for boards
-  where the automatic choice is wrong or missing, so one dashboard shows the
-  CPU temperature on every machine;
-- per sensor a name of its own, a scale and an offset (shown value =
-  raw × scale + offset), and whether it's listed as a source at all (a hidden
-  one can still feed `cpu.temperature`).
-
-The daemon keeps this in `~/.config/plusysmon/sensors.toml` on that machine,
-so every frontend connected to it sees the same names and values:
-
-```toml
-cpu_temperature = "thermal_zone0.temp1"
-
-[sensors."it87.2624.in3"]
-label = "+12V"
-multiplier = 6.0
-offset = 0.0
-hidden = false
-```
-
-### Virtual sensors
-
-When machines report the same thing through different sensors (the CPU
-voltage is `in0` on one board and `in1` on another), a widget pointing at
-one of them stays empty on the others. A **virtual sensor** fixes that: a
-source of your own (`virtual.1`, `virtual.2`, ...) under **Sensors → Virtual**,
-which widgets use like any other.
-
-- Make one from a source (its unit becomes the virtual sensor's), then name it.
-- On each machine, link the sources that measure the thing there; only sources
-  in the same unit can be linked. Links are per machine, told apart by
-  certificate fingerprint, so they survive address changes.
-- **On every other machine** holds links for machines without their own: each
-  uses the first of them it has. That's one setup for many alike servers.
-- With several sources linked, the mode combines them: first available,
-  average, highest, lowest or sum (e.g. "hottest drive").
-
-Virtual sensors belong to the app, like the layout, in
-`~/.config/plusysmon/virtual_sensors.toml`:
-
-```toml
-[[sensors]]
-id = "virtual.1"
-name = "CPU voltage"
-unit = "volts"
-mode = "first"
-
-[[sensors.bindings]]
-machine = "0B:10:77:…"       # plusysmond --fingerprint over there
-hostname = "desk"
-sources = ["sensor.it87.2624.in0"]
-
-[[sensors.bindings]]
-machine = ""                 # every other machine
-sources = ["sensor.nct6798.656.in1"]
-```
-
-Things to know:
-
-- **Motherboard voltages are raw.** Super I/O chips (it87, nct67xx, ...)
-  measure most rails through resistor dividers the kernel doesn't know about,
-  so e.g. the 12 V rail may read about 2 V and most inputs are unnamed. Name
-  and scale them under Sensors to what they are on your board.
-- **CPU power** comes from the RAPL energy counter, which only root can read
-  (it leaks information through a power side channel, see PLATYPUS). Running
-  the daemon as root shows it; so does making the file world-readable, e.g.
-  with a tmpfiles rule `z /sys/class/powercap/intel-rapl:0/energy_uj 0444 - - -`,
-  if you accept that trade-off on your machine.
-- Fans controlled by software (fan curves, zero-RPM modes) legitimately read 0.
-
-`cargo test -p plusysmond live_sensors -- --ignored --nocapture` lists what the
-daemon finds.
-
-## Fan control
-
-Optional, picked when installing (`./install.sh --fans`). It needs no data of
-its own: the daemon already samples every temperature, and every few seconds
-(3 by default) it works out each controlled fan's speed from those samples. So
-it costs next to nothing, and keeps going with no app open.
-
-- **PluFan** (`plusysfan`, the same program as the monitor under another name,
-  with its own menu entry, window and preferences in `fan-app.toml`) shows every
-  fan the connected machine lets software drive, grouped by board and card, and
-  sets each to **Auto** (the BIOS or the driver decides, as before), **Fixed**
-  or a **Curve**, with a minimum, a maximum and whether it may stop. Like the
-  monitor it connects to any machine, and remembers the same ones.
-- **Curves** set a speed by a temperature (or any other source). Drag the points
-  on the graph, double-click to add or remove one; the line through the graph is
-  where the input is now. A curve can follow several sources (the hottest, the
-  coolest, their average) or a [virtual sensor](#virtual-sensors), and has
-  **hysteresis** (speeds drop only once the input fell this far below where they
-  rose), **smoothing** (the input's average over some seconds) and limits on how
-  fast speeds rise and fall.
-- The settings live with the machine's daemon, in `~/.config/plusysmon/fans.toml`,
-  like its sensor settings; the file can be written by hand on a server.
-- Controlled fans are data sources too (`fan.<id>`), for widgets.
-
-Writing fan speeds needs root, and the daemon is a user service, so a small
-helper does that part: `plusysfand`, a system service installed to
-`/usr/local/libexec` (owned by root: never in a user's prefix, since whoever
-could replace it would get root). It knows nothing of temperatures; it sets the
-speeds the daemon sends over `/run/plusysfand/plusysfand.sock`, for the users
-listed in `/etc/plusysmon/fand.conf`, and keeps the fans safe:
-
-- it records how each fan was set before taking it, and gives it back exactly
-  so (the BIOS's automatic mode) when its fan is set to Auto, when the daemon
-  disconnects or stops, and when the daemon stays quiet for 10 seconds (hung);
-- it gives everything back when it stops, and after a crash through
-  `ExecStopPost=plusysfand --restore` or on its next start, from the state it
-  keeps in `/run/plusysfand`;
-- it puts a fan back under control if the firmware takes it (resume from sleep),
-  and the daemon gives a fan back when its curve's sources are gone.
-
-It drives `pwm` outputs in `/sys/class/hwmon` (motherboard fan chips, AMD
-cards, laptops, Raspberry Pi fans) and NVIDIA cards through NVML. Many boards'
-fan chips need a driver first, often `it87` or `nct6775` (`sudo modprobe it87`,
-and the module's name in `/etc/modules-load.d/` to keep it). `plusysfand --list`
-shows what it finds; `systemctl status plusysfand` and
-`journalctl -u plusysfand` show what it did. Updates from the app rebuild the
-daemon and the apps but leave the helper as it is (it would need sudo); run
-`./install.sh` yourself after a change to it, and the app says when one is due.
-`./install.sh --no-fans` (or `--uninstall`) stops the helper, which hands every
-fan back, and removes it.
-
-## Processes
-
-The Processes page lists everything running on the connected machine: search by
-name, command, user or PID, sort by any column, pick columns and toggle kernel
-threads in the columns menu. Selecting a process opens its details with Pause /
-End (SIGTERM) / Kill (SIGKILL). Keyboard: arrows and Page Up/Down move the
-selection, Delete ends the selected process, Esc closes the details.
-
-The daemon only walks `/proc` while some client has this page open, and then
-sends only what changed since the previous update. It can signal processes of
-its own user; others are refused by the kernel, and PIDs 0 and 1 are never
-signalled. Disk rates of other users' processes need privileges and show as "—".
-
-## Apps
-
-The Apps page groups processes into the applications you started, with icons,
-totals, a CPU sparkline per app, and End/Kill for the whole app. Clicking a
-process in an app's details opens it on the Processes page.
-
-How processes are assigned, in order:
-
-1. **Steam games**: everything below Steam's `reaper SteamLaunch AppId=<id>`
-   process. Games run inside Steam's own systemd unit, which is why
-   cgroup-based monitors file them under Steam; the reaper doesn't lie. Names
-   come from the library's `appmanifest_<id>.acf`, artwork and logo from
-   Steam's library cache.
-2. **Desktop apps**: the systemd unit desktop sessions start apps in
-   (`app-<id>@….service`, `app-<launcher>-<id>-<pid>.scope`), matched to a
-   `.desktop` file for the name and icon (looked up in your icon theme).
-3. Everything else counts as a background process.
-
-Known limits: programs started from a terminal belong to the terminal's app,
-and all Chromium-based browsers share one unit (`org.chromium.Chromium`), so a
-browser and its installed web apps can't be told apart.
-
-Icons and artwork are fetched from the daemon (so they work for remote
-machines too; it only serves files it registered itself) and cached in
-`~/.cache/plusysmon/assets/`.
-
-`cargo test -p plusysmond live_apps -- --ignored --nocapture` prints how the
-current machine's processes are grouped.
+Then connect from the app with the server's address and the token from
+`~/.config/plusysmon/token` on the server.
 
 ## Development
 
-- `cargo test` runs the parser, protocol, theme and layout tests.
-- `plusysmon --screenshot out.png` renders the window, saves it after 5 s and
-  quits; `--open updates` (or `connection`, `sensors`, `appearance`) opens a
-  dialog first. `--fans` starts PluFan instead.
-- Fan control without touching real fans: `plusysfand --sysfs <dir> --socket
-  <path> --state <file> --config <file>` drives a fake `<dir>/class/hwmon/...`
-  tree, and `plusysmond --fan-helper <path>` (built with `--features fans`)
-  talks to it. Both apps share `qml/shell/AppWindow.qml`; PluFan's QML is in
-  `qml/fans`.
-- `PLUSYSMON_ADDRESS=host PLUSYSMON_TOKEN=… cargo test -p plusysmon live_probe
-  -- --ignored --nocapture` shows what the Updates dialog sees of a machine;
-  `live_update` updates it.
-- With stderr redirected, Qt logs to the journal instead; set
-  `QT_FORCE_STDERR_LOGGING=1` to see QML warnings in the terminal.
-- Design tokens are in `crates/frontend/qml/design/Appearance.qml`; the colour
-  scheme is built by `design/Scheme.js` from the roles `src/theme.rs` computes.
-  Components after Swiftify's are in `qml/components`, the window's shell in
-  `qml/shell`, and shaders (baked with Qt's `qsb` at build time) in `qml/shaders`.
+```sh
+cargo run --release -p plusysmond   # daemon, listens on 127.0.0.1:7878
+cargo run --release -p plusysmon    # app, connects to it automatically
+cargo test
+```
+
+The workspace has the daemon (`crates/daemon`), the app (`crates/frontend`),
+the fan helper (`crates/fand`) and the shared protocol (`crates/protocol`).
