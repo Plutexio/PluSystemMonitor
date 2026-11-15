@@ -181,6 +181,22 @@ function offlineText(reply) {
     return "Offline" + when + ". " + (reply.status ? reply.status + " " : "") + "Reconnecting…"
 }
 
+// What's wrong with the connection, when something is: { title, brief,
+// detail, icon }, the title and brief for the indicator, the detail for
+// hovering or clicking it. null while it works or is still on its way.
+function trouble(reply, serviceUp) {
+    if (!serviceUp)
+        return { title: "Offline", brief: "", icon: "network-disconnect",
+                 detail: absence(null, reply, serviceUp) }
+    if (isOffline(reply))
+        return { title: "Offline", brief: reply.offlineSince > 0 ? ago(reply.offlineSince) : "",
+                 icon: "network-disconnect", detail: offlineText(reply) }
+    if (reply && reply.state === "refused")
+        return { title: "Can't connect", brief: "", icon: "dialog-error",
+                 detail: reply.status || "The daemon turned this widget away." }
+    return null
+}
+
 // Why a source shows nothing.
 function absence(source, reply, serviceUp) {
     if (!serviceUp)

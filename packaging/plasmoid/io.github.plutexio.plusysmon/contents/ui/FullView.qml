@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
+import org.kde.plasma.components as PlasmaComponents
 
 import "Sources.js" as Sources
 
@@ -23,6 +24,8 @@ Item {
 
     readonly property var main: sources[0] ?? null
     readonly property bool offline: serviceUp && Sources.isOffline(reply)
+    /// No daemon to talk to, or it went away: shown as a big indicator.
+    readonly property var trouble: Sources.trouble(reply, serviceUp)
     // Offline, the last values stay up, faded, if there are any.
     readonly property bool live: serviceUp && reply !== null
                                  && (reply.connected || offline && sources.some(s => s.available))
@@ -62,15 +65,15 @@ Item {
                 font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.05
             }
             Rectangle {
-                visible: root.offline
+                visible: root.trouble !== null
                 width: Kirigami.Units.smallSpacing * 2
                 height: width
                 radius: width / 2
                 color: Kirigami.Theme.negativeTextColor
             }
             Text {
-                visible: root.machineLabel.length > 0 || root.offline
-                text: root.machineLabel || "offline"
+                visible: root.machineLabel.length > 0
+                text: root.machineLabel
                 elide: Text.ElideRight
                 Layout.maximumWidth: root.width * 0.4
                 color: root.dim
@@ -78,40 +81,154 @@ Item {
             }
         }
 
-        Loader {
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            active: root.live
-            visible: root.live
-            opacity: root.offline ? 0.4 : 1
-            Behavior on opacity { NumberAnimation { duration: 400 } }
-            sourceComponent: {
-                switch (root.style) {
-                case "graph": return graphView
-                case "value": return valueView
-                case "list": return listView
-                default: return gaugeView
+
+            Loader {
+                anchors.fill: parent
+                active: root.live
+                visible: root.live
+                opacity: root.offline ? 0.25 : 1
+                Behavior on opacity { NumberAnimation { duration: 400 } }
+                sourceComponent: {
+                    switch (root.style) {
+                    case "graph": return graphView
+                    case "value": return valueView
+                    case "list": return listView
+                    default: return gaugeView
+                    }
                 }
             }
+
+            Absence {
+                anchors.fill: parent
+                visible: !root.live && root.trouble === null
+                text: Sources.absence(null, root.reply, root.serviceUp)
+            }
+
+            // Over the faded last values, if there are any.
+            Disconnected {
+                anchors.fill: parent
+                trouble: root.trouble
+            }
+        }
+    }
+
+    // No daemon to talk to: a big "Offline", the why on hover or click.
+    component Disconnected: Item {
+        id: box
+        property var trouble: null
+        /// The detail shown under the badge, after a click.
+        property bool open: false
+        readonly property bool small: width < Kirigami.Units.gridUnit * 9
+                                      || height < Kirigami.Units.gridUnit * 5
+        readonly property color negative: Kirigami.Theme.negativeTextColor
+
+        visible: opacity > 0
+        opacity: trouble !== null ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 250 } }
+        onTroubleChanged: if (trouble === null) open = false
+
+        // Taps beside the badge close the detail again.
+        MouseArea {
+            anchors.fill: parent
+            enabled: box.open
+            onClicked: box.open = false
         }
 
-        Absence {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            visible: !root.live
-            text: Sources.absence(null, root.reply, root.serviceUp)
-        }
+        ColumnLayout {
+            anchors.centerIn: parent
+            width: parent.width
+            spacing: Kirigami.Units.smallSpacing * 2
 
-        // Over the faded last values: since when, and why.
-        Text {
-            Layout.fillWidth: true
-            visible: root.live && root.offline
-            text: root.offline ? Sources.offlineText(root.reply) : ""
-            wrapMode: Text.Wrap
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            color: Kirigami.Theme.negativeTextColor
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            Rectangle {
+                id: badge
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: box.width
+                implicitWidth: badgeRow.implicitWidth + Kirigami.Units.largeSpacing * (box.small ? 2 : 3)
+                implicitHeight: badgeRow.implicitHeight + Kirigami.Units.largeSpacing * (box.small ? 1 : 1.6)
+                radius: height / 2
+                color: Sources.tonal(box.negative, root.ground, root.dark)
+                border.width: 1
+                border.color: Qt.alpha(box.negative, hover.containsMouse || box.open ? 0.7 : 0.35)
+                Behavior on border.color { ColorAnimation { duration: 150 } }
+                scale: hover.pressed ? 0.96 : hover.containsMouse ? 1.03 : 1
+                Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
+                RowLayout {
+                    id: badgeRow
+                    anchors.centerIn: parent
+                    spacing: Kirigami.Units.smallSpacing * (box.small ? 1.5 : 2.5)
+
+                    Kirigami.Icon {
+                        Layout.preferredWidth: box.small ? Kirigami.Units.iconSizes.smallMedium : Kirigami.Units.iconSizes.medium
+                        Layout.preferredHeight: Layout.preferredWidth
+                        source: box.trouble ? box.trouble.icon : ""
+                        isMask: true
+                        color: box.negative
+                    }
+                    ColumnLayout {
+                        spacing: 0
+                        Text {
+                            text: box.trouble ? box.trouble.title : ""
+                            color: box.negative
+                            font.weight: Font.DemiBold
+                            font.pointSize: Kirigami.Theme.defaultFont.pointSize * (box.small ? 1.2 : 1.6)
+                        }
+                        Text {
+                            visible: !box.small && text.length > 0
+                            text: box.trouble && box.trouble.brief ? "for " + box.trouble.brief : ""
+                            color: Kirigami.Theme.textColor
+                            opacity: 0.65
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            font.features: { "tnum": 1 }
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: hover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: box.open = !box.open
+                }
+
+                PlasmaComponents.ToolTip {
+                    visible: hover.containsMouse && !box.open
+                    text: box.trouble ? box.trouble.detail : ""
+                }
+            }
+
+            // The why, on a card so it reads over the faded values.
+            Rectangle {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(box.width, Kirigami.Units.gridUnit * 18)
+                Layout.preferredHeight: detail.implicitHeight + Kirigami.Units.largeSpacing * 2
+                Layout.maximumHeight: Math.max(0, box.height - badge.height - parent.spacing)
+                visible: opacity > 0
+                opacity: box.open ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+                radius: Kirigami.Units.cornerRadius * 2
+                color: Qt.alpha(root.ground, 0.92)
+                border.width: 1
+                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.1)
+                clip: true
+
+                Text {
+                    id: detail
+                    anchors.fill: parent
+                    anchors.margins: Kirigami.Units.largeSpacing
+                    text: box.trouble ? box.trouble.detail : ""
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.Wrap
+                    elide: Text.ElideRight
+                    color: Kirigami.Theme.textColor
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                }
+            }
         }
     }
 

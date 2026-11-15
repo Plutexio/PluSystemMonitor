@@ -56,7 +56,7 @@ PlasmoidItem {
         sources: root.sources
         colors: root.colors
         live: root.live || root.offline
-        offline: root.offline
+        trouble: Sources.trouble(backend.reply, backend.up)
         style: root.config.style === "list" ? "value" : root.config.style
         vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
         interval: backend.intervalMs

@@ -13,8 +13,9 @@ Item {
     property var sources: []
     property var colors: []
     property bool live: false
-    /// Show the last values, faded, with a red dot.
-    property bool offline: false
+    /// No daemon to talk to (Sources.trouble): an "Offline" chip shows
+    /// instead of the values; the tooltip and the popup say why.
+    property var trouble: null
     property string style: "gauge"
     property bool vertical: false
     property int interval: 1000
@@ -29,8 +30,10 @@ Item {
     signal clicked()
 
     // Across the panel the panel decides; this is only a fallback.
-    implicitWidth: vertical ? Kirigami.Units.iconSizes.medium : grid.implicitWidth
-    implicitHeight: vertical ? grid.implicitHeight : Kirigami.Units.iconSizes.medium
+    implicitWidth: vertical ? Kirigami.Units.iconSizes.medium
+                            : trouble !== null ? chip.implicitWidth : grid.implicitWidth
+    implicitHeight: vertical ? (trouble !== null ? chip.implicitHeight : grid.implicitHeight)
+                             : Kirigami.Units.iconSizes.medium
 
     MouseArea {
         anchors.fill: parent
@@ -40,8 +43,7 @@ Item {
     GridLayout {
         id: grid
         anchors.centerIn: parent
-        opacity: root.offline ? 0.4 : 1
-        Behavior on opacity { NumberAnimation { duration: 400 } }
+        visible: root.trouble === null
         flow: root.vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: root.vertical ? -1 : 1
         columns: root.vertical ? 1 : -1
@@ -65,17 +67,42 @@ Item {
         }
     }
 
-    // Offline, as the app's Recent list marks it.
+    // No daemon: the icon and what's wrong, as big as the panel allows.
     Rectangle {
-        visible: root.offline
-        width: Math.max(6, root.size * 0.2)
-        height: width
-        radius: width / 2
-        x: grid.x + grid.width - width * 0.8
-        y: Math.max(0, grid.y - height * 0.2)
-        color: Kirigami.Theme.negativeTextColor
+        id: chip
+        anchors.centerIn: parent
+        visible: root.trouble !== null
+        implicitWidth: root.vertical ? root.size
+                                     : chipRow.implicitWidth + root.size * 0.5
+        implicitHeight: root.vertical ? root.size : root.size * 0.8
+        width: implicitWidth
+        height: implicitHeight
+        radius: Math.min(height / 2, Kirigami.Units.cornerRadius * 3)
+        color: Qt.alpha(Sources.tonal(Kirigami.Theme.negativeTextColor, root.ground, root.dark), 0.9)
         border.width: 1
-        border.color: root.ground
+        border.color: Qt.alpha(Kirigami.Theme.negativeTextColor, 0.35)
+
+        RowLayout {
+            id: chipRow
+            anchors.centerIn: parent
+            spacing: root.size * 0.15
+
+            Kirigami.Icon {
+                Layout.preferredWidth: root.size * (root.vertical ? 0.6 : 0.5)
+                Layout.preferredHeight: Layout.preferredWidth
+                source: root.trouble ? root.trouble.icon : ""
+                isMask: true
+                color: Kirigami.Theme.negativeTextColor
+            }
+            Text {
+                // A vertical panel is too narrow for words.
+                visible: !root.vertical
+                text: root.trouble ? root.trouble.title : ""
+                color: Kirigami.Theme.negativeTextColor
+                font.weight: Font.DemiBold
+                font.pixelSize: Math.max(8, root.size * 0.34)
+            }
+        }
     }
 
     // The value, as large as fits the box it is given.
