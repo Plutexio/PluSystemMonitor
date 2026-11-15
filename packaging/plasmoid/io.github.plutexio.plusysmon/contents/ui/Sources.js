@@ -16,6 +16,20 @@ function bytes(value) {
     return value.toFixed(i >= 3 ? 1 : 0) + " " + units[i]
 }
 
+// "3 d 4 h", "12 min 5 s": the two largest units are enough.
+function duration(seconds) {
+    var s = Math.max(0, Math.floor(seconds))
+    var parts = [[86400, "d"], [3600, "h"], [60, "min"], [1, "s"]]
+    var out = []
+    for (var i = 0; i < parts.length && out.length < 2; i++) {
+        if (s >= parts[i][0] || (parts[i][1] === "s" && out.length === 0)) {
+            out.push(Math.floor(s / parts[i][0]) + " " + parts[i][1])
+            s %= parts[i][0]
+        }
+    }
+    return out.join(" ")
+}
+
 // A value in its unit (metrics.rs `Unit`).
 function metric(value, unit) {
     switch (unit) {
@@ -27,6 +41,7 @@ function metric(value, unit) {
     case "volts": return value.toFixed(3) + " V"
     case "rpm": return Math.round(value) + " RPM"
     case "amps": return value.toFixed(2) + " A"
+    case "seconds": return duration(value)
     }
     return value.toFixed(1)
 }
@@ -39,6 +54,7 @@ function brief(value, unit) {
     case "bytes": return bytes(value).replace("iB", "").replace(" ", "")
     case "megahertz": return value >= 1000 ? (value / 1000).toFixed(1) + "G" : Math.round(value) + "M"
     case "rpm": return Math.round(value) + ""
+    case "seconds": return duration(value).replace("min", "m").replace(/ /g, "")
     }
     return metric(value, unit)
 }
@@ -114,6 +130,8 @@ function icon(source) {
         return "flash"
     if (unit === "rpm" || unit === "megahertz")
         return "speedometer"
+    if (unit === "seconds")
+        return "chronometer"
     if (id.indexOf("game.") === 0)
         return "input-gaming"
     if (id.indexOf("app.") === 0)

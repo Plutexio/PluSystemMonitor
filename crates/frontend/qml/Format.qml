@@ -31,6 +31,7 @@ QtObject {
         case "volts": return value.toFixed(3) + " V"
         case "rpm": return Math.round(value) + " RPM"
         case "amps": return value.toFixed(2) + " A"
+        case "seconds": return duration(value * 1000)
         }
         return value.toFixed(1)
     }

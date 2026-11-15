@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Bumped with every change to the message types, compatible or not.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The oldest peer this build still talks to. Raised (to `PROTOCOL_VERSION`)
 /// only by changes older peers can't cope with.
@@ -314,6 +314,9 @@ pub struct Sample {
     /// Fans the daemon controls (since 7).
     #[serde(default)]
     pub fans: Vec<fans::FanState>,
+    /// Seconds since the machine booted (since 8).
+    #[serde(default)]
+    pub uptime: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -742,6 +745,7 @@ mod tests {
             gpus: vec![],
             sensors: vec![],
             fans: vec![],
+            uptime: Some(3600),
         });
         let ServerMsg::Sample(s) = decode::<ServerMsg>(&encode(&msg)).unwrap() else {
             panic!("wrong variant");
@@ -749,5 +753,6 @@ mod tests {
         assert_eq!(s.timestamp_ms, 42);
         assert_eq!(s.cpu.per_core, vec![10.0, 15.0]);
         assert_eq!(s.mem.swap_used, 1);
+        assert_eq!(s.uptime, Some(3600));
     }
 }

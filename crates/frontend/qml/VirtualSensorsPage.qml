@@ -38,6 +38,7 @@ Column {
         case "volts": return qsTr("Voltage")
         case "rpm": return qsTr("Fan speed")
         case "amps": return qsTr("Current")
+        case "seconds": return qsTr("Duration")
         }
         return unit
     }

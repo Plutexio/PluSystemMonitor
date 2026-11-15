@@ -621,6 +621,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             fans: vec![],
+            uptime: None,
         }
     }
 

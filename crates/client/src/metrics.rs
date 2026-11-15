@@ -30,6 +30,8 @@ pub enum Unit {
     Volts,
     Rpm,
     Amps,
+    /// A duration, e.g. uptime.
+    Seconds,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -279,6 +281,7 @@ fn unit_accent(unit: Unit) -> &'static str {
         Unit::Watts => "gpu",
         Unit::Volts => "network",
         Unit::Amps => "swap",
+        Unit::Seconds => "network",
     }
 }
 
@@ -584,6 +587,19 @@ fn read(sample: &Sample) -> Vec<Reading> {
         );
     }
 
+    if let Some(uptime) = sample.uptime {
+        // No full scale: the gauge just follows the value.
+        add(
+            "system.uptime".into(),
+            "Uptime".into(),
+            "System",
+            Unit::Seconds,
+            "network",
+            uptime as f64,
+            0.0,
+        );
+    }
+
     for fan in &sample.fans {
         add(
             format!("fan.{}", fan.id),
@@ -638,6 +654,10 @@ pub fn value_of(sample: &Sample, id: &str) -> Option<f64> {
         }
         "sensor" => sample.sensors.iter().find(|s| s.id == rest).map(|s| s.value),
         "fan" => sample.fans.iter().find(|f| f.id == rest).map(|f| f.percent),
+        "system" => match rest {
+            "uptime" => sample.uptime.map(|s| s as f64),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -693,6 +713,7 @@ mod tests {
             }],
             sensors: vec![],
             fans: vec![],
+            uptime: Some(90_061),
         }
     }
 
@@ -718,6 +739,7 @@ mod tests {
                 "gpu.0.temperature",
                 "gpu.0.power",
                 "gpu.0.core_clock",
+                "system.uptime",
                 "game.cpu",
                 "game.memory",
                 "game.gpu",
@@ -743,6 +765,10 @@ mod tests {
         // No natural maximum: scale to the highest value seen.
         assert_eq!(get(&metrics, "gpu.0.core_clock")["max"], 2500.0);
         assert_eq!(get(&metrics, "gpu.0.vram")["unit"], "bytes");
+        let uptime = get(&metrics, "system.uptime");
+        assert_eq!(uptime["value"], 90_061.0);
+        assert_eq!(uptime["unit"], "seconds");
+        assert_eq!(value_of(&sample(0.0, 0), "system.uptime"), Some(90_061.0));
     }
 
     #[test]

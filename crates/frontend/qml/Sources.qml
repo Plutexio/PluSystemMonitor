@@ -87,6 +87,8 @@ QtObject {
             return { symbol: "mode_fan", shape: "clover8" }
         if (unit === "megahertz")
             return { symbol: "speed", shape: "softBurst" }
+        if (unit === "seconds")
+            return { symbol: "schedule", shape: "cookie6" }
         if (id.startsWith("game."))
             return { symbol: "sports_esports", shape: "puffy" }
         if (id.startsWith("app."))

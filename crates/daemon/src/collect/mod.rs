@@ -58,6 +58,7 @@ impl Collector {
             gpus: self.gpu.sample(),
             sensors,
             fans: Vec::new(),
+            uptime: uptime(),
         })
     }
 
@@ -73,5 +74,26 @@ impl Collector {
 
     pub fn reset_processes(&mut self) {
         self.processes.reset();
+    }
+}
+
+/// Whole seconds since boot, from /proc/uptime ("12345.67 98765.43").
+fn uptime() -> Option<u64> {
+    let text = std::fs::read_to_string("/proc/uptime").ok()?;
+    parse_uptime(&text)
+}
+
+fn parse_uptime(text: &str) -> Option<u64> {
+    let seconds: f64 = text.split_whitespace().next()?.parse().ok()?;
+    (seconds.is_finite() && seconds >= 0.0).then_some(seconds as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parses_uptime() {
+        assert_eq!(super::parse_uptime("350735.47 234388.90\n"), Some(350735));
+        assert_eq!(super::parse_uptime(""), None);
+        assert_eq!(super::parse_uptime("x y"), None);
     }
 }
