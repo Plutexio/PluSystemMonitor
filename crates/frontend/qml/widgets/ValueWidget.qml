@@ -43,12 +43,16 @@ Card {
         font.pixelSize: Appearance.fontSize.smaller
     }
 
-    // The reading set round and big, as a title is.
+    // The reading set round and big, as a title is; long ones ("4 d 1 h")
+    // shrink to the card's width rather than run past it.
     TitleText {
         anchors.left: parent.left
+        anchors.right: parent.right
         anchors.top: parent.top
         text: root.source && root.source.available ? root.source.text : "—"
         font.pixelSize: Math.max(22, Math.min(parent.height * 0.42, 52))
+        fontSizeMode: Text.HorizontalFit
+        minimumPixelSize: 12
         tabularNumbers: true
     }
 }
